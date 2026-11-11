@@ -3,10 +3,9 @@
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "noEmit": true,
-    "allowJs": true,
-    "checkJs": false,
+    "outDir": "dist-tests",
+    "rootDir": "tests",
     "types": ["node"]
   },
-  "include": ["src", "tests"]
+  "include": ["tests"]
 }
