@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.artifacts/
+*.tsbuildinfo
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
