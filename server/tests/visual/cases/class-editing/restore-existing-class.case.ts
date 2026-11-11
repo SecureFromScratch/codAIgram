@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { page } from '../../test-support.ts';
+import { resetOwnershipEditor } from '../../support/editor-support.ts';
+
+export const TEST_CASE_METADATA = {
+  title: 'reports a hidden existing class conflict until @ restores its saved definition',
+  prompt: { availability: 'available', text: 'Starting a class using an existing name is a conflict; adding @ removes it and restores the existing class definition for editing.' }
+};
+
+export function registerRestoreExistingClassCase(): void {
+  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+    const { editor, text } = await resetOwnershipEditor();
+    const existing = 'ExistingClass\n  field: string\n  run(value: number)';
+    await editor.fill(`${text}\n\n${existing}`);
+    await page.locator('[data-class-name="ClassDiagram"]').dblclick();
+    await page.waitForFunction((expected: string): boolean => [...document.querySelectorAll('.cm-content .cm-line')].map((line: Element): string | null => line.textContent).join('\n') === expected, text);
+    await editor.fill(`${text}\n\nExistingClass`);
+    const conflict = editor.locator('.dsl-error').filter({ hasText: 'ExistingClass' });
+    await conflict.first().waitFor();
+    const style = await conflict.first().evaluate((element: HTMLElement): { readonly style: string; readonly color: string } => ({ style: getComputedStyle(element).textDecorationStyle, color: getComputedStyle(element).textDecorationColor }));
+    assert.equal(style.style, 'wavy');
+    assert.equal(style.color, 'rgb(220, 38, 38)');
+    await editor.press('End');
+    await page.keyboard.type('@');
+    await page.waitForFunction((expected: string): boolean => [...document.querySelectorAll('.cm-content .cm-line')].map((line: Element): string | null => line.textContent).join('\n') === expected, `${text}\n\n${existing}`);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+    assert.equal(await page.locator('[data-class-name="ExistingClass"]').count(), 1);
+    await editor.fill(`${text}\n\n${existing.replace('run(value: number)', 'execute(value: number)')}`);
+    await page.waitForFunction((): boolean => document.querySelector('[data-class-name="ExistingClass"]')?.textContent?.includes('execute') === true);
+  });
+}

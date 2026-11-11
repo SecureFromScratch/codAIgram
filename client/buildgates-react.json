@@ -1,0 +1,17 @@
+{ 
+    "minimumJustificationCharacters": 120, "justificationMarker": "UNTRUST-ALLOW-REACT:", 
+    "requireImageAlt": true, 
+    "trustedHtmlPaths": [], 
+    "restrictedBrowserApis": [
+        { 
+            "symbol": "fetch", 
+            "message": "Use the class-details HTTP boundary.", 
+            "allowPaths": ["client/src/class-details.ts"] 
+        }, { 
+            "symbol": "window.setTimeout", 
+            "message": "Use the owned click timer.", 
+            "allowPaths": ["client/src/click-timer.ts"] 
+        }
+    ], 
+    "ruleSeverities": { "UBR007": "error" } 
+}

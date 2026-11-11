@@ -1,0 +1,56 @@
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createApp } from '../../server/dist/app.js';
+import { MemoryClassRepository } from '../../server/dist/memory-class-repository.js';
+
+let server;
+let base;
+before(async () => {
+  server = await new Promise(resolve => { const instance = createApp(new MemoryClassRepository()).listen(0, '127.0.0.1', () => resolve(instance)); });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  base = `http://127.0.0.1:${address.port}/api`;
+});
+after(async () => { if (server) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
+
+async function post(body, path = 'classesDetails') { return fetch(`${base}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+
+test('returns the requested class details, including methods and ownership', async () => {
+  const response = await post({ classNames: ['ClassDiagram', 'Class', 'Unknown'] });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(result.map(item => item.name), ['ClassDiagram', 'Class']);
+  assert.equal(result[0].isPartial, false);
+  assert.equal(result[0].methods.length, 4);
+  assert.deepEqual(result[0].relations, [{ kind: 'OWNS', name: 'classes', target: 'Class', many: true }]);
+  assert.deepEqual(result[1], { name: 'Class', methods: [], relations: [], isPartial: true });
+});
+
+test('updateClasses stores a batch and replaces an existing class', async () => {
+  const updates = [{ name: 'NewClass', methods: ['run(value: string)'], relations: [{ kind: 'OWNS', name: 'items', target: 'Item', many: true }], isPartial: false }, { name: 'Class', methods: ['inspect()'], relations: [], isPartial: false }];
+  const response = await post(updates, 'updateClasses');
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { updated: 2 });
+  const read = await post({ classNames: ['NewClass', 'Class'] });
+  assert.deepEqual(await read.json(), updates);
+});
+
+test('updateClasses rejects invalid batches without partially applying them', async () => {
+  const valid = { name: 'ValidOnlyIfAllPass', methods: [], relations: [], isPartial: true };
+  const bad = [[], {}, [valid, { ...valid }], [valid, { name: '../unsafe', methods: [], relations: [], isPartial: true }], [{ ...valid, isPartial: 'true' }], [{ ...valid, methods: [42] }], [{ ...valid, relations: [{ kind: 'INVALID', name: 'x', target: 'Y', many: false }] }], [{ ...valid, extra: true }]];
+  for (const body of bad) assert.equal((await post(body, 'updateClasses')).status, 400);
+  assert.deepEqual(await (await post({ classNames: ['ValidOnlyIfAllPass'] })).json(), []);
+});
+
+test('rejects an oversized update body and the old route is absent', async () => {
+  const response = await post([{ name: 'TooLarge', methods: ['a'.repeat(270000)], relations: [], isPartial: false }], 'updateClasses');
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: 'Request is too large.' });
+  assert.equal((await post({ classNames: ['Class'] }, 'detailsClasses')).status, 404);
+});
+
+test('rejects malformed, oversized and unknown input fields', async () => {
+  for (const body of [{ classNames: [] }, { classNames: ['<bad>'] }, { classNames: ['Class', 3] }, { classNames: Array(101).fill('Class') }, { classNames: ['Class'], extra: true }, {}]) {
+    assert.equal((await post(body)).status, 400);
+  }
+});

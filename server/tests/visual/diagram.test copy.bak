@@ -1,0 +1,777 @@
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+import { createApp } from '../../server/dist/app.js';
+import { MemoryClassRepository } from '../../server/dist/memory-class-repository.js';
+
+let server;
+let browser;
+let page;
+let api;
+
+before(async () => {
+  api = await new Promise(resolve => { const instance = createApp(new MemoryClassRepository()).listen(0, '127.0.0.1', () => resolve(instance)); });
+  const apiAddress = api.address();
+  assert.ok(apiAddress && typeof apiAddress !== 'string');
+  server = await createServer({ configFile: 'client/vite.config.ts', server: { host: '127.0.0.1', port: 41731, strictPort: false, proxy: { '/api': `http://127.0.0.1:${apiAddress.port}` } } });
+  await server.listen();
+  const address = server.httpServer.address();
+  assert.ok(address && typeof address !== 'string');
+  browser = await chromium.launch({ headless: true });
+  page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  page.setDefaultTimeout(5000);
+  await page.goto(`http://127.0.0.1:${address.port}/`);
+  await page.locator('.canvas svg').first().waitFor({ timeout: 10000 });
+});
+
+after(async () => {
+  if (browser) await browser.close();
+  if (server) await server.close();
+  if (api) await new Promise((resolve, reject) => api.close(error => error ? reject(error) : resolve()));
+});
+
+async function inspect() {
+  return page.evaluate(() => {
+    const source = document.querySelector('.joint-type-standard-headeredrectangle');
+    const target = document.querySelector('.joint-type-standard-rectangle');
+    if (!source || !target) throw new Error('Expected both class boxes');
+    const rectangles = source.querySelectorAll('rect');
+    const text = source.querySelectorAll('text');
+    if (rectangles.length !== 2 || text.length !== 2) throw new Error('Expected a class body, header and two text areas');
+    const bounds = element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const header = bounds(rectangles[1]);
+    const intersects = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const inHeader = [...document.querySelectorAll('svg text')].filter(element => intersects(bounds(element), header)).map(element => element.textContent);
+    const bodyValue = [...text[1].querySelectorAll(':scope > tspan')].map(row => [...row.childNodes].map(node => node.nodeName.toLowerCase() === 'tspan' ? [...node.childNodes].filter(child => child.nodeType === Node.TEXT_NODE).map(child => child.textContent).join('') : node.textContent).join('')).join('');
+    return { header, box: bounds(rectangles[0]), headerText: bounds(text[0]), bodyText: bounds(text[1]), headerValue: text[0].textContent, bodyValue, inHeader, target: bounds(target.querySelector('rect')) };
+  });
+}
+
+test('startup requests both class details and fills the editor from the server', async () => {
+  const request = page.waitForRequest(request => request.url().endsWith('/api/classesDetails') && request.method() === 'POST');
+  await page.reload();
+  assert.deepEqual((await request).postDataJSON(), { classNames: ['ClassDiagram', 'Class'] });
+  await page.locator('.joint-type-standard-headeredrectangle').waitFor();
+  const editor = await page.getByRole('textbox', { name: 'Diagram text' }).textContent();
+  assert.ok(editor.includes('connectClasses(from: string, to: string, connectionType: ConnectionType, arity: integer)'));
+  assert.ok(editor.includes('OWNS classes: Class[]'));
+});
+
+async function checkTooltipAtPanelEdge(edge) {
+  await page.setViewportSize({ width: 1600, height: 440 });
+  try {
+    const canvas = page.locator('.canvas');
+    await canvas.evaluate((element, edgeName) => {
+      const box = element.querySelector('.joint-type-standard-headeredrectangle rect');
+      const viewport = element.getBoundingClientRect();
+      const rect = box.getBoundingClientRect();
+      element.scrollTop += edgeName === 'top' ? rect.top - viewport.top - 2 : rect.bottom - viewport.bottom + 2;
+    }, edge);
+    const placement = await canvas.evaluate(element => {
+      const box = element.querySelector('.joint-type-standard-headeredrectangle rect').getBoundingClientRect();
+      const panel = element.getBoundingClientRect();
+      return { topGap: box.top - panel.top, bottomGap: panel.bottom - box.bottom, scrollTop: element.scrollTop };
+    });
+    assert.ok(placement.scrollTop > 0, 'the graph scrollbar was used');
+    assert.ok(Math.abs(edge === 'top' ? placement.topGap : placement.bottomGap) <= 4, `class box is at the ${edge} of the graph panel`);
+    await page.locator('.joint-type-standard-headeredrectangle [data-method-index="0"]').hover();
+    const tooltip = page.getByRole('tooltip');
+    await tooltip.waitFor();
+    const bounds = await tooltip.evaluate(element => {
+      const tip = element.getBoundingClientRect();
+      const panel = element.closest('.graph-pane').getBoundingClientRect();
+      return { tip: tip.toJSON(), panel: panel.toJSON(), width: window.innerWidth, height: window.innerHeight, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, text: element.innerText };
+    });
+    assert.ok(bounds.text.includes('publicMethods') && bounds.text.includes('string[]'), 'full signature and type details are visible');
+    assert.ok(bounds.tip.top >= bounds.panel.top && bounds.tip.bottom <= bounds.panel.bottom, 'tooltip fits vertically in the graph panel');
+    assert.ok(bounds.tip.left >= bounds.panel.left && bounds.tip.right <= bounds.panel.right, 'tooltip fits horizontally in the graph panel');
+    assert.ok(bounds.tip.top >= 0 && bounds.tip.bottom <= bounds.height && bounds.tip.left >= 0 && bounds.tip.right <= bounds.width, 'tooltip fits inside the screen');
+    assert.ok(bounds.scrollHeight <= bounds.clientHeight + 1, 'tooltip content is not clipped');
+  } finally {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.locator('.canvas').evaluate(element => { element.scrollTop = 0; });
+    await page.mouse.move(2, 2);
+  }
+}
+
+test('method tooltip fits when ClassDiagram is scrolled to the top', async () => { await checkTooltipAtPanelEdge('top'); });
+test('method tooltip fits when ClassDiagram is scrolled to the bottom', async () => { await checkTooltipAtPanelEdge('bottom'); });
+
+test('editor highlights class, methods, parameter types, and ownership while editing', async () => {
+  const editor = page.getByRole('textbox', { name: 'Diagram text' });
+  const heading = editor.locator('.dsl-class-name');
+  assert.equal(await heading.innerText(), 'ClassDiagram');
+  const headingStyle = await heading.evaluate(element => ({ weight: getComputedStyle(element).fontWeight, style: getComputedStyle(element).fontStyle, decoration: getComputedStyle(element).textDecorationLine }));
+  assert.ok(Number(headingStyle.weight) >= 700);
+  assert.equal(headingStyle.style, 'italic');
+  assert.ok(headingStyle.decoration.includes('underline'));
+  assert.equal(await editor.locator('.dsl-method-name').first().innerText(), 'addClass');
+  assert.equal(await editor.locator('.dsl-parameter').first().innerText(), 'name');
+  assert.equal(await editor.locator('.dsl-type-keyword').first().innerText(), 'string');
+  const owns = editor.locator('.dsl-ownership');
+  assert.equal(await owns.innerText(), 'OWNS');
+  const ownsStyle = await owns.evaluate(element => ({ style: getComputedStyle(element).fontStyle, weight: getComputedStyle(element).fontWeight, decoration: getComputedStyle(element).textDecorationLine, color: getComputedStyle(element).color }));
+  assert.equal(ownsStyle.style, 'normal');
+  assert.ok(Number(ownsStyle.weight) >= 700);
+  assert.equal(ownsStyle.decoration, 'none');
+  assert.equal(ownsStyle.color, 'rgb(0, 0, 0)');
+  assert.equal(await editor.locator('.dsl-parameter').first().evaluate(element => getComputedStyle(element).fontStyle), 'italic');
+  assert.equal(await editor.locator('.dsl-type-keyword').first().evaluate(element => getComputedStyle(element).fontStyle), 'normal');
+  assert.equal(await editor.locator('.dsl-type').last().evaluate(element => getComputedStyle(element).fontStyle), 'normal');
+  assert.equal(await editor.locator('.dsl-type').last().innerText(), 'Class');
+  const updated = 'Diagram\n  add(\n    value: Map<string, number>\n    )\nOWNS things: Thing[]';
+  await editor.fill(updated);
+  assert.equal(await editor.locator('.dsl-class-name').innerText(), 'Diagram');
+  assert.equal(await editor.locator('.dsl-method-name').innerText(), 'add');
+  assert.equal(await editor.locator('.dsl-parameter').first().innerText(), 'value');
+  assert.equal(await editor.locator('.dsl-type').first().innerText(), 'Map');
+  assert.equal(await editor.locator('.dsl-type').last().innerText(), 'Thing');
+  await page.reload();
+  await page.locator('.joint-type-standard-headeredrectangle').waitFor();
+});
+
+test('every class declaration in the editor has the specified class-name style', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const source = `${text}\n\nModification\n  by: string\n  at: datetime\n\nModificationHistory\n  modifications: Modification[]\n  push(newModification: Modification)\n\nPartial`;
+  await editor.fill(source);
+  const declarations = await editor.locator('.cm-line').evaluateAll(lines => lines.filter(line => /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.textContent ?? '')).map(line => {
+    const span = line.querySelector('.dsl-class-name');
+    const style = span && getComputedStyle(span);
+    return { name: line.textContent, marked: span?.textContent, color: style?.color, weight: style?.fontWeight, italic: style?.fontStyle, decoration: style?.textDecorationLine };
+  }));
+  assert.deepEqual(declarations.map(item => item.name), ['ClassDiagram', 'Modification', 'ModificationHistory', 'Partial']);
+  for (const item of declarations) {
+    assert.equal(item.marked, item.name, `${item.name} is fully highlighted`);
+    assert.equal(item.color, 'rgb(38, 60, 115)', `${item.name} color`);
+    assert.ok(Number(item.weight) >= 700, `${item.name} is bold`);
+    assert.equal(item.italic, 'italic', `${item.name} is italic`);
+    assert.ok(item.decoration.includes('underline'), `${item.name} is underlined`);
+  }
+  await page.reload();
+  await page.locator('.joint-type-standard-headeredrectangle').waitFor();
+});
+
+test('class heading area contains only the class name', async () => {
+  const data = await inspect();
+  assert.equal(data.headerValue, 'ClassDiagram');
+  assert.deepEqual(data.inHeader, ['ClassDiagram']);
+  assert.ok(data.headerText.top >= data.header.top && data.headerText.bottom <= data.header.bottom, 'heading fits inside its header');
+});
+
+test('method text stays below the header and within class borders', async () => {
+  const data = await inspect();
+  for (const member of ['addClass', 'addPartialClass', 'connectClasses', 'recalcLayout']) assert.ok(data.bodyValue.includes(member), `${member} is present`);
+  assert.ok(!data.bodyValue.includes('OWNS'), 'ownership is not displayed as a method');
+  assert.ok(data.bodyText.top >= data.header.bottom, 'body text does not overlap the heading area');
+  assert.ok(data.bodyText.left >= data.box.left && data.bodyText.right <= data.box.right, 'body text fits horizontally');
+  assert.ok(data.bodyText.bottom <= data.box.bottom, 'body text fits vertically');
+});
+
+test('each class box is no wider than 200 pixels', async () => {
+  const data = await inspect();
+  assert.ok(data.box.width <= 200, `ClassDiagram width is ${data.box.width}px`);
+  assert.ok(data.target.width <= 200, `Class width is ${data.target.width}px`);
+});
+
+test('class headers match and ownership uses a filled source diamond with member label', async () => {
+  const data = await page.evaluate(() => {
+    const header = document.querySelector('.joint-type-standard-headeredrectangle rect[joint-selector="header"]');
+    const partial = document.querySelector('.joint-type-standard-rectangle rect');
+    const link = document.querySelector('.joint-link path[joint-selector="line"]');
+    if (!header || !partial || !link) throw new Error('Expected class boxes and ownership link');
+    const markerId = link.getAttribute('marker-start')?.match(/#([^\)]+)/)?.[1];
+    const marker = markerId ? document.getElementById(markerId) : undefined;
+    return { headerHeight: header.getBoundingClientRect().height, partialHeight: partial.getBoundingClientRect().height, headerFill: header.getAttribute('fill'), partialFill: partial.getAttribute('fill'), marker: marker?.innerHTML, labels: [...document.querySelectorAll('.joint-link text')].map(text => text.textContent) };
+  });
+  assert.equal(data.headerHeight, 30);
+  assert.equal(data.partialHeight, data.headerHeight);
+  assert.equal(data.partialFill, data.headerFill);
+  assert.match(data.marker, /M 0 0 L 10 -6 L 20 0 L 10 6 Z/);
+  assert.match(data.marker, /fill="#233f73"/);
+  assert.deepEqual(data.labels, ['classes', '*']);
+});
+
+async function resetOwnershipEditor() {
+  await page.reload();
+  await page.locator('.joint-type-standard-rectangle').first().waitFor();
+  const editor = page.getByRole('textbox', { name: 'Diagram text' });
+  return { editor, text: (await editor.locator('.cm-line').allTextContents()).join('\n') };
+}
+
+async function waitForLinkLabels(labels) {
+  await page.waitForFunction(expected => JSON.stringify([...document.querySelectorAll('.joint-link text')].map(item => item.textContent)) === JSON.stringify(expected), labels);
+}
+
+test('removing or mangling OWNS removes the link, marks the declaration, and recovers when retyped', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  for (const invalid of ['classes: Class[]', 'OWX classes: Class[]']) {
+    await editor.fill(text.replace('OWNS classes: Class[]', invalid));
+    await page.waitForFunction(() => document.querySelectorAll('.joint-link').length === 0);
+    const error = editor.locator('.dsl-error');
+    await error.first().waitFor();
+    assert.ok((await error.allTextContents()).join('').includes('classes: Class[]'));
+    const style = await error.first().evaluate(element => ({ line: getComputedStyle(element).textDecorationLine, style: getComputedStyle(element).textDecorationStyle, color: getComputedStyle(element).textDecorationColor }));
+    assert.ok(style.line.includes('underline'));
+    assert.equal(style.style, 'wavy');
+    assert.equal(style.color, 'rgb(220, 38, 38)');
+    await editor.fill(text);
+    await waitForLinkLabels(['classes', '*']);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+  }
+});
+
+test('changing owned type between singular and array toggles the many marker in both directions', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('OWNS classes: Class[]', 'OWNS classes: Class'));
+  await waitForLinkLabels(['classes']);
+  assert.equal(await page.locator('.joint-type-standard-rectangle text').textContent(), 'Class');
+  await editor.fill(text);
+  await waitForLinkLabels(['classes', '*']);
+});
+
+test('missing owned type shows a question mark and removes the partial target', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('OWNS classes: Class[]', 'OWNS classes:'));
+  await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-rectangle text')].some(item => item.textContent === '?'));
+  const targets = await page.locator('.joint-type-standard-rectangle text').allTextContents();
+  assert.ok(!targets.includes('Class'));
+  assert.ok(targets.includes('?'));
+  await editor.fill(text);
+  await waitForLinkLabels(['classes', '*']);
+});
+
+test('missing owned type preserves a non-partial target as well as the question mark', async () => {
+  await page.route('**/api/classesDetails', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const target = body.find(item => item.name === 'Class');
+    target.isPartial = false;
+    await route.fulfill({ response, json: body });
+  });
+  try {
+    const { editor, text } = await resetOwnershipEditor();
+    await editor.fill(text.replace('OWNS classes: Class[]', 'OWNS classes:'));
+    await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-rectangle text')].some(item => item.textContent === '?'));
+    const targets = await page.locator('.joint-type-standard-rectangle text').allTextContents();
+    assert.ok(targets.includes('Class'));
+    assert.ok(targets.includes('?'));
+  } finally {
+    await page.unroute('**/api/classesDetails');
+    await page.reload();
+    await page.locator('.joint-type-standard-rectangle').first().waitFor();
+  }
+});
+
+test('unnamed ownership retains the many marker without a connector member label', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('OWNS classes: Class[]', 'OWNS Class[]'));
+  await waitForLinkLabels(['*']);
+  assert.equal(await page.locator('.joint-type-standard-rectangle text').textContent(), 'Class');
+  await editor.fill(text);
+  await waitForLinkLabels(['classes', '*']);
+});
+
+test('diagram text stays on one line per item, fitting or ending in an ellipsis', async () => {
+  async function check(expectedHeading, expectedMembers, expectedTarget) {
+    const actual = await page.evaluate(() => {
+      const source = document.querySelector('.joint-type-standard-headeredrectangle');
+      const target = document.querySelector('.joint-type-standard-rectangle');
+      if (!source || !target) throw new Error('Expected both class boxes');
+      const [heading, body] = source.querySelectorAll('text');
+      const targetText = target.querySelector('text');
+      const header = source.querySelectorAll('rect')[1];
+      const sourceBox = source.querySelector('rect');
+      const targetBox = target.querySelector('rect');
+      if (!heading || !body || !targetText || !header || !sourceBox || !targetBox) throw new Error('Diagram text or bounds are missing');
+      const rows = [...body.querySelectorAll(':scope > tspan')].map(row => ({ text: [...row.childNodes].map(node => node.nodeName.toLowerCase() === 'tspan' ? [...node.childNodes].filter(child => child.nodeType === Node.TEXT_NODE).map(child => child.textContent).join('') : node.textContent).join(''), rect: row.getBoundingClientRect().toJSON() }));
+      return { heading: heading.textContent, headingRect: heading.getBoundingClientRect().toJSON(), headerRect: header.getBoundingClientRect().toJSON(), rows, sourceRect: sourceBox.getBoundingClientRect().toJSON(), target: targetText.textContent, targetRect: targetText.getBoundingClientRect().toJSON(), targetBoxRect: targetBox.getBoundingClientRect().toJSON(), marker: [...document.querySelectorAll('.joint-link text')].map(text => text.textContent) };
+    });
+    const fitsOrTruncated = (shown, full) => shown === full || (shown.endsWith('…') && full.startsWith(shown.slice(0, -1)));
+    assert.ok(fitsOrTruncated(actual.heading, expectedHeading), 'heading is complete or ellipsized');
+    assert.equal(actual.rows.length, expectedMembers.length, 'each source line has exactly one visual line');
+    for (const [index, expected] of expectedMembers.entries()) {
+      const row = actual.rows[index];
+      assert.ok(fitsOrTruncated(row.text, expected), `source line ${index + 1} is complete or ellipsized`);
+      assert.ok(row.rect.left >= actual.sourceRect.left && row.rect.right <= actual.sourceRect.right, `source line ${index + 1} fits`);
+    }
+    assert.ok(fitsOrTruncated(actual.target, expectedTarget), 'target name is complete or ellipsized');
+    assert.ok(actual.headingRect.left >= actual.headerRect.left && actual.headingRect.right <= actual.headerRect.right, 'heading fits');
+    assert.ok(actual.targetRect.left >= actual.targetBoxRect.left && actual.targetRect.right <= actual.targetBoxRect.right, 'target fits');
+    assert.deepEqual(actual.marker, ['classes', '*']);
+  }
+
+  await check('ClassDiagram', ['addClass', 'addPartialClass', 'connectClasses', 'recalcLayout'], 'Class');
+  const heading = 'VeryWideClassDiagramNameWithManyCharacters';
+  const member = 'anExtremelyLongMethodNameWithArguments(name: string)';
+  const target = 'AnotherVeryLongTargetClassName';
+  const relationship = `OWNS classes: ${target}[]`;
+  await page.getByRole('textbox', { name: 'Diagram text' }).fill(`${heading}\n  ${member}\n${relationship}`);
+  await page.waitForFunction(() => document.querySelector('.joint-type-standard-headeredrectangle text')?.textContent?.startsWith('VeryWide'));
+  assert.ok((await page.getByRole('textbox', { name: 'Diagram text' }).textContent()).includes(member), 'editor preserves the full source');
+  await check(heading, ['anExtremelyLongMethodNameWithArguments'], target);
+});
+
+test('method names expose signatures and parameter types on hover', async () => {
+  const source = 'Diagram\n  f(name: string, items: string[])\n  g(count: integer)\n  empty()\nOWNS classes: Class[]';
+  await page.getByRole('textbox', { name: 'Diagram text' }).fill(source);
+  await page.waitForFunction(() => document.querySelector('.joint-type-standard-headeredrectangle text')?.textContent === 'Diagram');
+  for (const [name, tooltip] of [['f', 'f(name, items)\n-name: string\n-items: string[]'], ['g', 'g(count)\n-count: integer'], ['empty', 'empty()']]) {
+    const method = page.locator(`.joint-type-standard-headeredrectangle [data-method-tooltip^="${name}("]`);
+    await method.hover();
+    assert.equal(await method.getAttribute('data-method-tooltip'), tooltip);
+    await page.getByRole('tooltip').waitFor();
+    assert.ok((await page.getByRole('tooltip').innerText()).includes(name));
+  }
+  const first = page.locator('.joint-type-standard-headeredrectangle [data-method-tooltip^="f("]');
+  await first.hover();
+  const styles = await page.getByRole('tooltip').evaluate(element => {
+    const signature = element.querySelector('.tooltip-signature');
+    const signatureNames = [...signature.querySelectorAll('[class^="argument-color-"]')];
+    const detailNames = [...element.querySelectorAll('.tooltip-parameter [class^="argument-color-"]')];
+    return { weight: getComputedStyle(signature).fontWeight, parentheses: getComputedStyle(signature.querySelector('.tooltip-paren')).color, names: signatureNames.map(name => getComputedStyle(name).color), details: detailNames.map(name => getComputedStyle(name).color), text: element.innerText };
+  });
+  assert.ok(Number(styles.weight) >= 700, 'signature is bold');
+  assert.notEqual(styles.parentheses, styles.names[0], 'parentheses have a distinct color');
+  assert.notEqual(styles.names[0], styles.names[1], 'arguments have distinct colors');
+  assert.deepEqual(styles.names, styles.details, 'argument colors match their type lines');
+  assert.ok(styles.text.includes('string[]'));
+  await page.mouse.move(2, 2);
+  assert.equal(await page.getByRole('tooltip').count(), 0, 'tooltip closes after leaving');
+  await first.focus();
+  await page.getByRole('tooltip').waitFor();
+  assert.equal(await first.getAttribute('aria-describedby'), 'method-tooltip');
+  assert.ok((await page.getByRole('textbox', { name: 'Diagram text' }).textContent()).includes('items: string[]'));
+  const seven = Array.from({ length: 7 }, (_, index) => `arg${index}: string`).join(', ');
+  await page.getByRole('textbox', { name: 'Diagram text' }).fill(`Palette\n  f(${seven})\nOWNS classes: Class[]`);
+  await page.waitForFunction(() => document.querySelector('.joint-type-standard-headeredrectangle text')?.textContent === 'Palette');
+  await page.locator('.joint-type-standard-headeredrectangle [data-method-index="0"]').hover();
+  const colors = await page.getByRole('tooltip').locator('.tooltip-signature [class^="argument-color-"]').evaluateAll(elements => elements.map(element => getComputedStyle(element).color));
+  assert.equal(new Set(colors).size, 7, 'colors remain distinct beyond six arguments');
+});
+
+test('editor keeps long lines unwrapped and accepts indented multiline methods', async () => {
+  const editor = page.getByRole('textbox', { name: 'Diagram text' });
+  const longName = 'a'.repeat(180);
+  await editor.fill(`Diagram\n  f(\n    name: string,\n\n      count: integer\n    )\n  ${longName}()\nOWNS classes: Class[]`);
+  await page.waitForFunction(() => document.querySelector('.status')?.textContent?.includes('up to date'));
+  const method = page.locator('.joint-type-standard-headeredrectangle [data-method-tooltip]').first();
+  await method.waitFor();
+  assert.equal(await method.getAttribute('data-method-tooltip'), 'f(name, count)\n-name: string\n-count: integer');
+  const dimensions = await page.locator('.cm-line').filter({ hasText: longName }).evaluate(line => ({ width: line.getBoundingClientRect().width, height: line.getBoundingClientRect().height, whiteSpace: getComputedStyle(line).whiteSpace, viewport: line.closest('.cm-scroller').clientWidth }));
+  assert.ok(dimensions.width > dimensions.viewport, 'long source line overflows horizontally');
+  assert.ok(['pre', 'nowrap'].includes(dimensions.whiteSpace), `source line does not wrap: ${dimensions.whiteSpace}`);
+  await editor.fill('Diagram\n  f(\n  name: string)');
+  await page.waitForFunction(() => document.querySelector('.status')?.textContent?.includes('continuation'));
+  assert.equal(await method.getAttribute('data-method-tooltip'), 'f(name, count)\n-name: string\n-count: integer', 'invalid edit retains the previous valid diagram');
+});
+
+async function waitForMethodNames(names) {
+  await page.waitForFunction(expected => JSON.stringify([...document.querySelectorAll('.joint-type-standard-headeredrectangle [data-method-index]')].map(item => item.textContent)) === JSON.stringify(expected), names);
+}
+
+async function assertRedWavyError(editor, expected) {
+  const errors = editor.locator('.dsl-error');
+  await errors.first().waitFor();
+  assert.ok((await errors.allTextContents()).join('').includes(expected));
+  const style = await errors.first().evaluate(element => ({ line: getComputedStyle(element).textDecorationLine, style: getComputedStyle(element).textDecorationStyle, color: getComputedStyle(element).textDecorationColor }));
+  assert.ok(style.line.includes('underline'));
+  assert.equal(style.style, 'wavy');
+  assert.equal(style.color, 'rgb(220, 38, 38)');
+}
+
+test('removing a method removes it from the class box', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('  addPartialClass(name: string)\n', ''));
+  await waitForMethodNames(['addClass', 'connectClasses', 'recalcLayout']);
+});
+
+test('undo restores a selected and deleted method in the editor and its original graph position', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const methodLine = editor.locator('.cm-line').filter({ hasText: 'addClass(name: string, publicMethods: string[])' });
+  await methodLine.click();
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Shift+End');
+  assert.equal(await page.evaluate(() => window.getSelection()?.toString()), '  addClass(name: string, publicMethods: string[])');
+  await page.keyboard.press('Backspace');
+  await waitForMethodNames(['addPartialClass', 'connectClasses', 'recalcLayout']);
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, text);
+  await waitForMethodNames(['addClass', 'addPartialClass', 'connectClasses', 'recalcLayout']);
+  const restored = page.locator('.joint-type-standard-headeredrectangle [data-method-index="0"]');
+  assert.equal(await restored.getAttribute('data-method-tooltip'), 'addClass(name, publicMethods)\n-name: string\n-publicMethods: string[]');
+  await restored.hover();
+  const tooltip = page.getByRole('tooltip');
+  await tooltip.waitFor();
+  const content = (await tooltip.textContent()).replace(/\s+/g, ' ');
+  for (const part of ['addClass(name, publicMethods)', 'name: string', 'publicMethods: string[]']) assert.ok(content.includes(part), part);
+});
+
+test('adding a method adds it to the class box', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('OWNS classes: Class[]', '  archive(name: string)\nOWNS classes: Class[]'));
+  await waitForMethodNames(['addClass', 'addPartialClass', 'connectClasses', 'recalcLayout', 'archive']);
+});
+
+test('invalid method syntax has a red wavy underline and retains the last valid graph', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('addClass(name: string, publicMethods: string[])', 'addClass(name string)'));
+  await assertRedWavyError(editor, 'addClass(name string)');
+  await waitForMethodNames(['addClass', 'addPartialClass', 'connectClasses', 'recalcLayout']);
+  await editor.fill(text);
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+});
+
+test('renaming a method updates the class box', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('addPartialClass', 'createPartialClass'));
+  await waitForMethodNames(['addClass', 'createPartialClass', 'connectClasses', 'recalcLayout']);
+});
+
+test('changing argument names, types, and count updates the method tooltip', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('addClass(name: string, publicMethods: string[])', 'addClass(label: number, option: boolean, items: Item[])'));
+  const method = page.locator('.joint-type-standard-headeredrectangle [data-method-tooltip^="addClass("]');
+  await page.waitForFunction(() => document.querySelector('[data-method-tooltip^="addClass("]')?.getAttribute('data-method-tooltip') === 'addClass(label, option, items)\n-label: number\n-option: boolean\n-items: Item[]');
+  await method.hover();
+  const tooltip = page.getByRole('tooltip');
+  await tooltip.waitFor();
+  const content = (await tooltip.textContent()).replace(/\s+/g, ' ');
+  for (const part of ['addClass(label, option, items)', 'label: number', 'option: boolean', 'items: Item[]']) assert.ok(content.includes(part), part);
+});
+
+test('changing the class title updates the class box', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace(/^ClassDiagram/, 'NewDiagram'));
+  await page.waitForFunction(() => document.querySelector('.joint-type-standard-headeredrectangle text')?.textContent === 'NewDiagram');
+});
+
+test('incorrect method indentation has a red wavy underline', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace('  addPartialClass', ' addPartialClass'));
+  await assertRedWavyError(editor, 'addPartialClass(name: string)');
+  await editor.fill(text);
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+});
+
+test('a missing class name displays a red wavy diagnostic', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(text.replace(/^ClassDiagram/, ''));
+  const missing = editor.locator('.dsl-missing-class');
+  await missing.waitFor();
+  const style = await missing.evaluate(element => ({ content: getComputedStyle(element, '::before').content, line: getComputedStyle(element, '::before').textDecorationLine, style: getComputedStyle(element, '::before').textDecorationStyle, color: getComputedStyle(element, '::before').textDecorationColor }));
+  assert.ok(style.content.includes('Class name required'));
+  assert.ok(style.line.includes('underline'));
+  assert.equal(style.style, 'wavy');
+  assert.equal(style.color, 'rgb(220, 38, 38)');
+  await editor.fill(text);
+  assert.equal(await editor.locator('.dsl-missing-class').count(), 0);
+});
+
+test('multiple classes update the graph and ownership reconnects when a target is renamed', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const extra = '\n\nClass\n  isPartial : bool\n  modifications: ModificationRecord[]\n  addModification(ModificationRecord)\n\nModificationRecord\n  by: [AI, Human, Scan]\n  at: datetime';
+  const source = text + extra;
+  await editor.fill(source);
+  await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-headeredrectangle text:first-of-type')].some(element => element.textContent === 'ModificationRecord'));
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+  const classBox = page.locator('.joint-type-standard-headeredrectangle').filter({ hasText: 'isPartial' });
+  assert.ok((await classBox.textContent()).includes('modifications'));
+  await editor.fill(source.replace('isPartial : bool', 'isComplete : bool'));
+  await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-headeredrectangle')].some(item => item.textContent.includes('isComplete : bool')));
+  await editor.fill(source);
+  await editor.fill(source.replace('\n\nClass\n', '\n\nClass1\n'));
+  await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-rectangle text')].some(item => item.textContent === 'Class'));
+  assert.ok((await page.locator('.joint-type-standard-headeredrectangle').allTextContents()).some(item => item.includes('Class1')));
+  await editor.fill(source);
+  await page.waitForFunction(() => document.querySelectorAll('.joint-type-standard-rectangle').length === 0);
+  await editor.fill(source.replace('\n\nClass\n', '\n\nClassDiagram\n'));
+  const conflict = editor.locator('.dsl-error').filter({ hasText: 'ClassDiagram' });
+  await conflict.first().waitFor();
+  assert.match(await conflict.first().getAttribute('title'), /Duplicate class name/);
+  await conflict.first().hover();
+  await page.locator('.dsl-diagnostic-tooltip').filter({ hasText: 'Duplicate class name: ClassDiagram.' }).waitFor();
+  await editor.fill(source.replace('\n\nClass\n', '\nClass\n'));
+  const separator = editor.locator('.dsl-error').filter({ hasText: 'Class' });
+  await separator.first().waitFor();
+  assert.match(await separator.first().getAttribute('title'), /blank line/);
+});
+
+test('editor-visible classes have a filled circular eye badge at the top left', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
+  const badges = page.locator('[data-eye-badge]');
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 2);
+  for (const badge of await badges.all()) {
+    const info = await badge.evaluate(element => {
+      const circle = element.querySelector('circle');
+      const box = element.closest('.joint-element')?.querySelector('rect');
+      const bounds = element.getBoundingClientRect();
+      const boxBounds = box?.getBoundingClientRect();
+      return { text: element.textContent, circle: circle && getComputedStyle(circle).fill, width: bounds.width, height: bounds.height, left: bounds.left, top: bounds.top, boxLeft: boxBounds?.left, boxTop: boxBounds?.top };
+    });
+    assert.ok(info.text.includes('👁'));
+    assert.ok(info.circle && info.circle !== 'none');
+    assert.ok(Math.abs(info.width - info.height) <= 2 && info.width <= 32, 'badge is a small circle');
+    assert.ok(Math.abs(info.left - info.boxLeft) <= info.width && Math.abs(info.top - info.boxTop) <= info.height, 'badge is at the class box top left');
+  }
+});
+
+test('clicking a graph class toggles its markup and eye badge', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const target = page.locator('.joint-type-standard-rectangle').filter({ hasText: 'Class' });
+  assert.equal(await target.locator('[data-eye-badge]').count(), 0);
+  await target.click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 2);
+  assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'), `${text}\n\nClass`);
+  await page.locator('.joint-type-standard-rectangle').filter({ hasText: 'Class' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 1);
+  assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'), text);
+});
+
+test('double clicking a class displays only that class text and its eye badge', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
+  const target = page.locator('.joint-type-standard-headeredrectangle').filter({ hasText: 'isPartial' });
+  await target.dblclick();
+  await page.waitForFunction(() => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === 'Class\n  isPartial: bool');
+  assert.equal(await page.locator('[data-eye-badge]').count(), 1);
+  assert.equal(await target.locator('[data-eye-badge]').count(), 1);
+  assert.equal(await page.locator('.joint-type-standard-headeredrectangle').count(), 2, 'hidden source classes remain on the graph');
+});
+
+test('emptying the editor retains the in-memory classes and lets them be reopened', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill('');
+  assert.equal(await page.locator('[data-eye-badge]').count(), 0);
+  assert.equal(await page.locator('.joint-type-standard-headeredrectangle').count(), 1);
+  await page.locator('.joint-type-standard-headeredrectangle').click();
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, text);
+  assert.equal(await page.locator('[data-eye-badge]').count(), 1);
+});
+
+test('hiding the last displayed class leaves an empty editor and keeps the graph', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await page.locator('.joint-type-standard-headeredrectangle').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 0);
+  assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'), '');
+  assert.equal(await page.locator('.joint-type-standard-headeredrectangle').count(), 1);
+  await page.locator('.joint-type-standard-headeredrectangle').click();
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, text);
+});
+
+test('editing a displayed class preserves hidden class definitions', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
+  await page.locator('.joint-type-standard-headeredrectangle').filter({ hasText: 'isPartial' }).dblclick();
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('isPartial'));
+  await editor.fill('Class\n  isComplete: bool');
+  await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-headeredrectangle')].some(item => item.textContent.includes('isComplete')));
+  const hidden = page.locator('.joint-type-standard-headeredrectangle').filter({ hasText: 'ClassDiagram' });
+  assert.equal(await hidden.count(), 1);
+  await hidden.click();
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('addPartialClass'));
+  assert.ok((await editor.locator('.cm-line').allTextContents()).join('\n').includes('isComplete: bool'));
+});
+
+test('a new class and referenced partial classes can be defined and edited', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const references = `${text}\n  property: PropertyType\n  use(value: ArgumentType)\nOWNS owned: OwnedType[]`;
+  for (const name of ['FreshClass', 'PropertyType', 'ArgumentType', 'OwnedType']) {
+    const source = `${references}\n\n${name}`;
+    await editor.fill(source);
+    assert.equal(await editor.locator('.dsl-error').count(), 0, `${name} can be declared`);
+    await editor.fill(`${source}\n  added()`);
+    await page.waitForFunction(className => document.querySelector(`[data-class-name="${className}"]`)?.textContent.includes('added'), name);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+  }
+});
+
+test('a hidden existing class is a conflict until @ restores its saved definition', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  const existing = 'ExistingClass\n  field: string\n  run(value: number)';
+  await editor.fill(`${text}\n\n${existing}`);
+  await page.locator('[data-class-name="ClassDiagram"]').dblclick();
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, text);
+  await editor.fill(`${text}\n\nExistingClass`);
+  const conflict = editor.locator('.dsl-error').filter({ hasText: 'ExistingClass' });
+  await conflict.first().waitFor();
+  const style = await conflict.first().evaluate(element => ({ style: getComputedStyle(element).textDecorationStyle, color: getComputedStyle(element).textDecorationColor }));
+  assert.equal(style.style, 'wavy');
+  assert.equal(style.color, 'rgb(220, 38, 38)');
+  await editor.press('End');
+  await page.keyboard.type('@');
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, `${text}\n\n${existing}`);
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+  assert.equal(await page.locator('[data-class-name="ExistingClass"]').count(), 1);
+  await editor.fill(`${text}\n\n${existing.replace('run(value: number)', 'execute(value: number)')}`);
+  await page.waitForFunction(() => document.querySelector('[data-class-name="ExistingClass"]')?.textContent.includes('execute'));
+});
+
+test('a hidden partial class referenced by another visible class may be completed', async () => {
+  const { editor, text } = await resetOwnershipEditor();
+  await page.locator('[data-class-name="Class"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 2);
+  await page.locator('[data-class-name="Class"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-eye-badge]').length === 1);
+  await editor.fill(`${text}\n\nClass`);
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+  await editor.fill(`${text}\n\nClass\n  added()`);
+  await page.waitForFunction(() => document.querySelector('[data-class-name="Class"]')?.textContent.includes('added'));
+  assert.equal(await editor.locator('.dsl-error').count(), 0);
+});
+
+for (const [reference, name] of [['  field: PropertyType', 'PropertyType'], ['  accept(value: ArgumentType)', 'ArgumentType']]) {
+  test(`a hidden partial class referenced by ${reference.trim()} may be completed`, async () => {
+    const { editor, text } = await resetOwnershipEditor();
+    const owner = `${text}\n${reference}`;
+    await editor.fill(`${owner}\n\n${name}`);
+    await page.locator('[data-class-name="ClassDiagram"]').dblclick();
+    await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, owner);
+    await editor.fill(`${owner}\n\n${name}`);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+    await editor.fill(`${owner}\n\n${name}\n  added()`);
+    await page.waitForFunction(className => document.querySelector(`[data-class-name="${className}"]`)?.textContent.includes('added'), name);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+  });
+}
+
+const SECONDARY_CLASSES = [
+  { name: 'Modification', source: 'Modification\n  by: string\n  at: datetime', members: ['by: string', 'at: datetime'] },
+  { name: 'ModificationHistory', source: 'ModificationHistory\n  modifications : Modification[]\n  push(newModification: Modification)\n  compact(maxModsToKeep: positive)', members: ['modifications : Modification[]', 'push', 'compact'] }
+];
+
+async function isolateSecondaryClass(name) {
+  const { editor, text } = await resetOwnershipEditor();
+  await editor.fill(`${text}\n\n${SECONDARY_CLASSES.map(item => item.source).join('\n\n')}`);
+  const target = page.locator(`[data-class-name="${name}"]`);
+  await target.waitFor();
+  await target.dblclick();
+  const selected = SECONDARY_CLASSES.find(item => item.name === name);
+  await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n') === expected, selected.source);
+  return { editor, selected };
+}
+
+for (const fixture of SECONDARY_CLASSES) {
+  test(`${fixture.name}: isolated class has correct header, body, bounds, highlighting and badge`, async () => {
+    const { editor } = await isolateSecondaryClass(fixture.name);
+    assert.equal(await editor.locator('.dsl-error').count(), 0);
+    assert.equal(await editor.locator('.dsl-class-name').innerText(), fixture.name);
+    assert.equal(await page.locator('[data-eye-badge]').count(), 1);
+    const geometry = await page.locator(`[data-class-name="${fixture.name}"]`).evaluate(element => {
+      const [body, header] = element.querySelectorAll('rect');
+      const [title, contents] = element.querySelectorAll('text');
+      return { body: body.getBoundingClientRect().toJSON(), header: header.getBoundingClientRect().toJSON(), title: title.getBoundingClientRect().toJSON(), contents: contents.getBoundingClientRect().toJSON(), titleText: title.textContent, bodyText: contents.textContent, rows: [...contents.querySelectorAll(':scope > tspan')].map(row => ({ text: row.textContent, rect: row.getBoundingClientRect().toJSON() })) };
+    });
+    assert.equal(geometry.titleText, fixture.name);
+    assert.ok(geometry.body.width <= 200);
+    assert.ok(geometry.title.top >= geometry.header.top && geometry.title.bottom <= geometry.header.bottom);
+    assert.ok(geometry.contents.top >= geometry.header.bottom && geometry.contents.bottom <= geometry.body.bottom);
+    assert.equal(geometry.rows.length, fixture.members.length);
+    for (const [index, expected] of fixture.members.entries()) {
+      const row = geometry.rows[index];
+      assert.ok(row.text === expected || (row.text.endsWith('…') && expected.startsWith(row.text.slice(0, -1))));
+      assert.ok(row.rect.left >= geometry.body.left && row.rect.right <= geometry.body.right);
+    }
+  });
+
+  test(`${fixture.name}: property edits, invalid syntax and title edits update only this class`, async () => {
+    const { editor, selected } = await isolateSecondaryClass(fixture.name);
+    const property = fixture.name === 'Modification' ? 'by: string' : 'modifications : Modification[]';
+    await editor.fill(selected.source.replace(property, 'updated: boolean'));
+    await page.waitForFunction(name => document.querySelector(`[data-class-name="${name}"]`)?.textContent.includes('updated: boolean'), fixture.name);
+    assert.equal(await page.locator('[data-class-name="ClassDiagram"]').count(), 1);
+    await editor.fill(selected.source.replace(property, 'updated boolean'));
+    await assertRedWavyError(editor, 'updated boolean');
+    await editor.fill(selected.source.replace(property, 'updated:'));
+    await assertRedWavyError(editor, 'updated:');
+    await editor.fill(selected.source.replace(/^\w+/, `${fixture.name}Renamed`));
+    await page.locator(`[data-class-name="${fixture.name}Renamed"]`).waitFor();
+    await editor.fill(selected.source.replace(/^\w+/, ''));
+    await editor.locator('.dsl-missing-class').waitFor();
+  });
+
+  test(`${fixture.name}: adding, renaming, deleting and undoing a method updates its own graph box`, async () => {
+    const { editor, selected } = await isolateSecondaryClass(fixture.name);
+    const original = `${selected.source}\n  inspect(value: string)`;
+    await editor.fill(original);
+    const box = page.locator(`[data-class-name="${fixture.name}"]`);
+    await page.waitForFunction(name => document.querySelector(`[data-class-name="${name}"]`)?.textContent.includes('inspect'), fixture.name);
+    await editor.fill(original.replace('inspect(value: string)', 'review(label: number, active: boolean)'));
+    const method = box.locator('[data-method-tooltip^="review("]');
+    await method.waitFor();
+    assert.equal(await method.getAttribute('data-method-tooltip'), 'review(label, active)\n-label: number\n-active: boolean');
+    await method.hover();
+    await page.getByRole('tooltip').waitFor();
+    const current = original.replace('inspect(value: string)', 'review(label: number, active: boolean)');
+    await editor.fill(current.replace('  review', ' review'));
+    await assertRedWavyError(editor, 'review(label: number, active: boolean)');
+    await editor.fill(current.replace('review(label: number, active: boolean)', 'review(label number)'));
+    await assertRedWavyError(editor, 'review(label number)');
+    await editor.fill(current);
+    const line = editor.locator('.cm-line').filter({ hasText: 'review(label: number, active: boolean)' });
+    await line.click(); await page.keyboard.press('Home'); await page.keyboard.press('Shift+End'); await page.keyboard.press('Backspace');
+    await page.waitForFunction(name => !document.querySelector(`[data-class-name="${name}"]`)?.textContent.includes('review'), fixture.name);
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction(expected => [...document.querySelectorAll('.cm-content .cm-line')].map(item => item.textContent).join('\n') === expected, current);
+    await box.locator('[data-method-tooltip^="review("]').waitFor();
+  });
+
+  test(`${fixture.name}: ownership edits update the correct connector and multiplicity`, async () => {
+    const { editor, selected } = await isolateSecondaryClass(fixture.name);
+    const relationship = `${selected.source}\nOWNS entries: Entry[]`;
+    await editor.fill(relationship);
+    await page.waitForFunction(() => [...document.querySelectorAll('.joint-link text')].some(item => item.textContent === 'entries'));
+    assert.equal(await page.locator('[data-class-name="Entry"]').count(), 1);
+    assert.equal(await page.locator('.joint-link').count(), 2);
+    await editor.fill(relationship.replace('Entry[]', 'Entry'));
+    await page.waitForFunction(() => [...document.querySelectorAll('.joint-link')].some(link => [...link.querySelectorAll('text')].map(item => item.textContent).join('|') === 'entries'));
+    await editor.fill(relationship.replace('entries: Entry[]', 'Entry[]'));
+    await page.waitForFunction(() => ![...document.querySelectorAll('.joint-link text')].some(item => item.textContent === 'entries'));
+    assert.equal(await page.locator('.joint-link').count(), 2);
+    await editor.fill(relationship.replace('OWNS entries: Entry[]', 'OWX entries: Entry[]'));
+    await page.waitForFunction(() => document.querySelectorAll('.joint-link').length === 1);
+    await assertRedWavyError(editor, 'entries: Entry[]');
+    await editor.fill(relationship);
+    await page.waitForFunction(() => document.querySelectorAll('.joint-link').length === 2);
+    await editor.fill(relationship.replace('Entry[]', ''));
+    await page.waitForFunction(() => [...document.querySelectorAll('.joint-type-standard-rectangle text')].some(item => item.textContent === '?'));
+    await editor.fill(relationship);
+    await page.waitForFunction(() => document.querySelectorAll('.joint-link').length === 2);
+    await editor.fill(selected.source);
+    await page.waitForFunction(() => document.querySelectorAll('.joint-link').length === 1);
+    assert.equal(await page.locator('[data-class-name="Entry"]').count(), 0);
+  });
+
+  test(`${fixture.name}: method tooltip stays inside the panel at its top and bottom edges`, async () => {
+    const { editor, selected } = await isolateSecondaryClass(fixture.name);
+    await editor.fill(`${selected.source}\n  inspect(value: string)`);
+    await page.setViewportSize({ width: 1600, height: 440 });
+    try {
+      for (const edge of ['top', 'bottom']) {
+        await page.locator('.canvas').evaluate((canvas, { name, side }) => {
+          const box = canvas.querySelector(`[data-class-name="${name}"] rect`).getBoundingClientRect();
+          const panel = canvas.getBoundingClientRect();
+          canvas.scrollTop += side === 'top' ? box.top - panel.top - 2 : box.bottom - panel.bottom + 2;
+        }, { name: fixture.name, side: edge });
+        await page.locator(`[data-class-name="${fixture.name}"] [data-method-tooltip^="inspect("]`).hover();
+        const tooltip = page.getByRole('tooltip');
+        await tooltip.waitFor();
+        const fits = await tooltip.evaluate(element => {
+          const tip = element.getBoundingClientRect();
+          const panel = element.closest('.graph-pane').getBoundingClientRect();
+          return tip.top >= panel.top && tip.bottom <= panel.bottom && tip.left >= panel.left && tip.right <= panel.right && tip.top >= 0 && tip.bottom <= window.innerHeight && tip.left >= 0 && tip.right <= window.innerWidth && element.scrollHeight <= element.clientHeight + 1;
+        });
+        assert.ok(fits, `tooltip fits at the ${edge} edge`);
+        assert.ok((await tooltip.textContent()).includes('value'));
+        await page.mouse.move(2, 2);
+      }
+    } finally {
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await page.locator('.canvas').evaluate(element => { element.scrollTop = 0; });
+    }
+  });
+}

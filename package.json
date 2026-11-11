@@ -1,0 +1,41 @@
+{
+  "name": "codaigram",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "build": "tsc -b && tsc -p server/tsconfig.tests.json && npm run check:gates && tsc -b && tsc -p server/tsconfig.tests.json && vite build --config client/vite.config.ts",
+    "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json && untrust-buildgates --project client/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project server/tsconfig.tests.json --config buildgates.json && untrust-buildgates-react --project client/tsconfig.json --config client/buildgates-react.json",
+    "test": "vitest run client/tests && npm run test:api && npm run test:visual",
+    "test:api": "node --test server/tests/api/*.test.ts",
+    "test:firestore": "node --test server/tests/firestore/*.test.ts",
+    "seed:local": "node scripts/seed-local.mjs",
+    "test:visual": "node --test server/tests/visual/*.test.ts",
+    "verify": "npm run build && npm test",
+    "dev:client": "vite --config client/vite.config.ts",
+    "start:server": "node server/dist/index.js"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.5",
+    "@google-cloud/firestore": "^9.4.0",
+    "@joint/core": "^4.1.3",
+    "express": "^5.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "playwright": "^1.65.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.0"
+  }
+}
