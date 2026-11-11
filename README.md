@@ -10,3 +10,4 @@ See [local startup and setup](docs/startup.md) for prerequisites, Firestore emul
 
 See [current design](docs/current-design.md) for scope and [choices](docs/choices.md) for future design decisions.
 "# codAIgram" 
+# codAIgram
