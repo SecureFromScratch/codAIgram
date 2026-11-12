@@ -1,1 +1,1 @@
-{ "extends": "./tsconfig.base.json", "files": [], "references": [{ "path": "./client" }, { "path": "./server" }] }
+{ "extends": "./tsconfig.base.json", "files": [], "references": [{ "path": "./shared" }, { "path": "./client" }, { "path": "./server" }, { "path": "./scanner" }] }

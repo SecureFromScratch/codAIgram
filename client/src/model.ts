@@ -8,6 +8,7 @@ export const INITIAL_TEXT: string = `ClassDiagram
 OWNS classes: Class[]`;
 
 export interface Relation {
+  kind: 'OWNS' | 'REF' | 'UNK';
   name: string;
   target: string;
   multiplicity: 'one' | 'many';
@@ -24,7 +25,9 @@ export type ParseResultT = { ok: true; diagram: Diagram } | {
   diagram?: Diagram;
   partialRetention?: 'retain' | 'discard' };
 
-/** A deliberately small first grammar for class members and ownership relationships. */
+const RELATION_KINDS: ReadonlySet<string> = new Set<string>(['OWNS', 'REF', 'UNK']);
+
+/** A deliberately small first grammar for class members and class relationships. */
 export function parseDiagram(text: string): ParseResultT {
   const lines: string[] = text.split(/\r?\n/);
   const blocks: string[][] = [[]];
@@ -80,28 +83,33 @@ function parseClass(text: string): ParseResultT {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(title)) return { ok: false, message: 'Start with a class name.' };
   const members: string[] = [];
   const targets: Relation[] = [];
-  let ownershipError: string = '';
+  let relationError: string = '';
   let partialRetention: 'retain' | 'discard' = 'discard';
   for (let index: number = 1; index < lines.length; index++) {
     const rawLine: string = lines.at(index) ?? '';
     const line: string = rawLine.trim();
-    if (/^OWNS\b/.test(line)) {
-      const named: RegExpMatchArray | string[] = line.match(/^OWNS\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)?\s*(\[\s*\])?\s*$/) ?? [];
-      const unnamed: RegExpMatchArray | string[] = line.match(/^OWNS\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[\s*\])?\s*$/) ?? [];
+    // UNTRUST-ALLOW-NULLISH: A relation prefix is optional because ordinary member declarations share this parser path; an absent match safely becomes an empty keyword below.
+    const relationMatch: RegExpMatchArray | null = line.match(/^([A-Z]+)\b/);
+    const relationKind: string = relationMatch?.at(1) ?? '';
+    if (RELATION_KINDS.has(relationKind)) {
+      const named: RegExpMatchArray | string[] = line.match(/^(OWNS|REF|UNK)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)?\s*(\[\s*\])?\s*$/) ?? [];
+      const unnamed: RegExpMatchArray | string[] = line.match(/^(OWNS|REF|UNK)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[\s*\])?\s*$/) ?? [];
       if (named[1]) {
-        const target: string = named[2] ?? '';
-        if (!target) ownershipError = 'Enter the owned class type.';
+        const target: string = named[3] ?? '';
+        if (!target) relationError = 'Enter the related class type.';
         targets.push({
-          name: named[1],
+          kind: named[1] as Relation['kind'],
+          name: named[2] ?? '',
           target: target || '?',
-          multiplicity: named[3] ? 'many' : 'one' });
+          multiplicity: named[4] ? 'many' : 'one' });
       } else if (unnamed[1]) targets.push({
+        kind: unnamed[1] as Relation['kind'],
         name: '',
-        target: unnamed[1],
-        multiplicity: unnamed[2] ? 'many' : 'one' });
+        target: unnamed[2] ?? '',
+        multiplicity: unnamed[3] ? 'many' : 'one' });
       else return {
         ok: false,
-        message: 'Expected OWNS name: Type or OWNS Type.' };
+        message: 'Expected OWNS, REF, or UNK relationship.' };
     } else if (/^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)) {
       if (!/^ {2}[^\s]/.test(rawLine)) return { ok: false, message: 'Indent methods exactly two spaces.' };
       let method: string = line;
@@ -124,15 +132,15 @@ function parseClass(text: string): ParseResultT {
     } else if (/^ {2}\S/.test(rawLine) && /^[A-Za-z_][A-Za-z0-9_]*\s*:\s*\S/.test(line)) {
       members.push(line);
     } else if (/^[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:/.test(line) && !/^\s/.test(rawLine)) {
-      ownershipError = 'Expected OWNS before the ownership declaration.';
+      relationError = 'Expected OWNS, REF, or UNK before the relationship declaration.';
       partialRetention = 'retain';
     } else return {
       ok: false,
-      message: 'Expected an indented method or an OWNS relationship.' };
+      message: 'Expected an indented method or a class relationship.' };
   }
-  if (ownershipError) return {
+  if (relationError) return {
     ok: false,
-    message: ownershipError,
+    message: relationError,
     diagram: { title, members, targets },
     partialRetention };
   return { ok: true, diagram: { title, members, targets } };

@@ -1,38 +1,28 @@
-export interface ClassDetails {
-  name: string;
-  methods: string[];
-  relations: {
-    kind: 'OWNS';
-    name: string;
-    target: string;
-    // UNTRUST-ALLOW-BOOLEAN: The existing HTTP class-details contract encodes relation multiplicity as a boolean; this client boundary must accept the server's established response shape without changing it.
-    many: boolean }[];
-  // UNTRUST-ALLOW-BOOLEAN: The existing HTTP class-details contract encodes partial status as a boolean; this client boundary must accept the server's established response shape without changing it.
-  isPartial: boolean;
-}
+import { logAndThrow, loggedFetch } from './utils.js';
+import { isClassDetails, parseClassDetails, type ArgsListT, type ClassDetails, type ClassMember, type CompositeTypeT, type FieldType } from '@codaigram/shared/class-types';
+export type { ClassDetails } from '@codaigram/shared/class-types';
 
 export async function loadClassDetails(signal: AbortSignal): Promise<ClassDetails[]> {
-  const response: Response = await fetch('/api/classesDetails', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ classNames: ['ClassDiagram', 'Class'] }),
-    signal });
-  if (!response.ok) throw new Error('Could not load class details.');
+  const response: Response = await loggedFetch('/api/getClasses', { signal });
+  if (!response.ok) logAndThrow(new Error('Could not load class details.'));
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || !data.every(isClassDetails)) throw new Error('Invalid class details response.');
-  return data;
+  if (!Array.isArray(data) || !data.every(isClassDetails)) logAndThrow(new Error('Invalid class details response.'));
+  return data.map((item: unknown) => parseClassDetails(item, logAndThrow));
 }
 
-function isClassDetails(value: unknown): value is ClassDetails {
-  // UNTRUST-ALLOW-NULLISH: JSON from the HTTP boundary may contain null; this guard excludes it before checking properties and admitting a value into the application.
-  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every((method: unknown) => typeof method === 'string') && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isRelation);
-}
-
-function isRelation(value: unknown): value is ClassDetails['relations'][number] {
-  // UNTRUST-ALLOW-NULLISH: JSON from the HTTP boundary may contain null; this guard excludes it before checking properties and admitting a value into the application.
-  return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'OWNS' && 'name' in value && typeof value.name === 'string' && 'target' in value && typeof value.target === 'string' && 'many' in value && typeof value.many === 'boolean';
-}
 
 export function classDetailsToText(details: ClassDetails): string {
-  return [details.name, ...details.methods.map((method: string) => `  ${method}`), ...details.relations.map((relation: ClassDetails['relations'][number]) => `${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`)].join('\n');
+  return [details.name, ...details.methods.flatMap(memberToDslLines), ...details.relations.map((relation: ClassDetails['relations'][number]) => `${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`)].join('\n');
+}
+
+function memberToDslLines(member: ClassMember): readonly string[] {
+  const field: FieldType | undefined = member.overloads.at(0)?.at(0);
+  if (field?.arg.startsWith('+')) return [`  ${member.name}: ${typeToDsl(field.t)}`];
+  return member.overloads.map((overload: ArgsListT) => `  ${member.name}(${overload.map((field: FieldType) => `${field.arg}: ${typeToDsl(field.t)}`).join(', ')})`);
+}
+
+function typeToDsl(type: CompositeTypeT): string {
+  if (typeof type === 'string') return type;
+  if (Array.isArray(type)) return type.map((value: string) => `'${value}'`).join(' | ');
+  return `{ ${Array.from(type.entries(), ([name, value]: [string, CompositeTypeT]) => `${name}: ${typeToDsl(value)}`).join(', ')} }`;
 }

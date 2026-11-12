@@ -2,6 +2,7 @@
   "name": "codaigram",
   "private": true,
   "type": "module",
+  "workspaces": ["shared", "scanner"],
   "version": "0.1.0",
   "engines": {
     "node": ">=22"
@@ -9,11 +10,12 @@
   "scripts": {
     "bootstrap": "node scripts/bootstrap.mjs",
     "build": "tsc -b && tsc -p server/tsconfig.tests.json && npm run check:gates && tsc -b && tsc -p server/tsconfig.tests.json && vite build --config client/vite.config.ts",
-    "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json && untrust-buildgates --project client/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project server/tsconfig.tests.json --config buildgates.json && untrust-buildgates-react --project client/tsconfig.json --config client/buildgates-react.json",
+    "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json && untrust-buildgates --project client/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project server/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project scanner/tsconfig.json --config buildgates.json && untrust-buildgates-react --project client/tsconfig.json --config client/buildgates-react.json",
     "test": "vitest run client/tests && npm run test:api && npm run test:visual",
     "build:server-tests": "tsc -b server && tsc -p server/tsconfig.tests.json",
     "test:api": "npm run build:server-tests && node --test server/dist-tests/api/*.test.js",
-    "test:firestore": "npm run build:server-tests && node --test server/dist-tests/firestore/*.test.js",
+    "test:firestore": "firebase emulators:exec --config firebase.test.json --only firestore --project codaigram-test \"npm run test:firestore:inside\"",
+    "test:firestore:inside": "npm run build:server-tests && node --test server/dist-tests/firestore/*.test.js",
     "seed:local": "node scripts/seed-local.mjs",
     "test:visual": "npm run build:server-tests && node --test server/dist-tests/visual/*.test.js",
     "verify": "npm run build && npm test",
@@ -21,6 +23,7 @@
     "start:server": "node server/dist/index.js"
   },
   "dependencies": {
+    "@codaigram/shared": "0.1.0",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.5",

@@ -7,3 +7,6 @@ dist-types/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+logs/
+scanner.log
+.workbench/

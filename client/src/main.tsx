@@ -9,7 +9,11 @@ import { classDetailsToText, loadClassDetails, type ClassDetails } from './class
 import { formatMember, type MemberDisplay, type Parameter } from './signatures';
 import { dslErrorsFor, dslErrorTooltip, dslHighlighting } from './dsl-highlighting';
 import { scheduleClick } from './click-timer';
+import { logAndThrow } from './utils';
+import { loadTestsInventory, type TestCaseDetails } from './tests-inventory';
 import './style.css';
+
+window.logAndThrow = logAndThrow;
 
 function fitText(text: string, maxWidth: number, font: string): string {
   // UNTRUST-ALLOW-NULLISH: Browser canvas context creation may fail; the boundary is checked immediately and the display falls back to a safe ellipsis.
@@ -269,12 +273,17 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         line: {
           stroke: '#7488a5',
           strokeWidth: 2,
+          strokeDasharray: relation.kind === 'UNK' ? '5 4' : 'none',
           sourceMarker: {
             type: 'path',
-            d: 'M 0 0 L 10 -6 L 20 0 L 10 6 Z',
-            fill: '#233f73',
+            d: relation.kind === 'OWNS' ? 'M 0 0 L 10 -6 L 20 0 L 10 6 Z' : '',
+            fill: relation.kind === 'OWNS' ? '#233f73' : 'none',
             stroke: '#233f73' },
-          targetMarker: { type: 'path', d: '' } } });
+          targetMarker: {
+            type: 'path',
+            d: relation.kind === 'REF' ? 'M 10 -5 0 0 10 5' : '',
+            fill: 'none',
+            stroke: '#233f73' } } });
       const labels: dia.Link.Label[] = [];
       if (relation.name) labels.push({
         position: { distance: 0.5, offset: -14 },
@@ -408,7 +417,7 @@ function Workspace({ initialText, initial, knownClasses }: {
       revision: previous.revision + 1,
       text: shown.map((item: string) => document.current.sources.get(item) ?? '').join('\n\n') }));
   }
-  return <main><header className="topbar"><div className="brand"><span className="mark">◇</span><strong>cod<span>AI</span>gram</strong></div><div className="subtitle">Think in text. See the structure.</div><div className="badge">EARLY PREVIEW</div></header><section className="workspace"><section className="pane text-pane"><div className="pane-heading"><div><span className="eyebrow">SOURCE</span><h1>Text editor</h1></div><span className="file-badge">CLASS DIAGRAM</span></div><p className="hint">Describe your diagram here. Your canvas updates as you type.</p><Editor initialText={initialText} onChange={change} selection={selection} hiddenNames={hiddenNames} /><div className="status" aria-live="polite"><span className="dot" />{message}</div></section><section className="pane graph-pane"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Diagram canvas</h2></div><span className="file-badge">LIVE VIEW</span></div><p className="hint">A visual projection of your text.</p><Canvas diagram={diagram} knownClasses={knownClasses} partialRetention={partialRetention} visible={visible} onSelect={select} /></section></section></main>;
+  return <section className="workspace"><section className="pane text-pane"><div className="pane-heading"><div><span className="eyebrow">SOURCE</span><h1>Text editor</h1></div><span className="file-badge">CLASS DIAGRAM</span></div><p className="hint">Describe your diagram here. Your canvas updates as you type.</p><Editor initialText={initialText} onChange={change} selection={selection} hiddenNames={hiddenNames} /><div className="status" aria-live="polite"><span className="dot" />{message}</div></section><section className="pane graph-pane"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Diagram canvas</h2></div><span className="file-badge">LIVE VIEW</span></div><p className="hint">A visual projection of your text.</p><Canvas diagram={diagram} knownClasses={knownClasses} partialRetention={partialRetention} visible={visible} onSelect={select} /></section></section>;
 }
 
 type LoadStateT = { status: 'loading' } | { status: 'error' } | {
@@ -416,27 +425,50 @@ type LoadStateT = { status: 'loading' } | { status: 'error' } | {
   text: string;
   diagram: Diagram;
   classes: readonly ClassDetails[] };
+type TestsLoadStateT = { status: 'loading' } | { status: 'error' } | { status: 'ready'; tests: readonly TestCaseDetails[] };
+type ModeT = 'classes' | 'tests';
+
+function Topbar({ mode, onModeChange }: { mode: ModeT; onModeChange: (mode: ModeT) => void }) {
+  return <header className="topbar"><div className="brand"><span className="mark">◇</span><strong>cod<span>AI</span>gram</strong></div><div className="subtitle">Think in text. See the structure.</div><nav className="mode-tabs" aria-label="Workspace mode"><button type="button" role="tab" aria-selected={mode === 'classes'} className={mode === 'classes' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('classes')}>Classes</button><button type="button" role="tab" aria-selected={mode === 'tests'} className={mode === 'tests' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('tests')}>Tests</button></nav><div className="badge">EARLY PREVIEW</div></header>;
+}
+
+function TestsWorkspace({ tests }: { tests: readonly TestCaseDetails[] }) {
+  const byGroup: Map<string, TestCaseDetails[]> = new Map<string, TestCaseDetails[]>();
+  tests.forEach((test: TestCaseDetails) => {
+    const group: TestCaseDetails[] = byGroup.get(test.group) ?? [];
+    group.push(test);
+    byGroup.set(test.group, group);
+  });
+  return <section className="workspace"><section className="pane tests-pane"><div className="pane-heading"><div><span className="eyebrow">INVENTORY</span><h1>Tests</h1></div><span className="file-badge">{tests.length} CASES</span></div><p className="hint">Tests discovered from the project server source.</p><nav className="tests-tree" aria-label="Tests inventory"><ul className="tests-tree-root">{Array.from(byGroup.entries(), ([groupName, groupTests]: [string, TestCaseDetails[]]) => <li key={groupName} className="test-group"><span className="tree-group-label">{groupName}</span><ul>{groupTests.map((test: TestCaseDetails) => <li key={`${test.group}.${test.name}`} className="test-case"><span>{test.name}</span><small>{test.description}</small></li>)}</ul></li>)}</ul></nav></section><section className="pane graph-pane tests-preview"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Test flow</h2></div><span className="file-badge">COMING LATER</span></div><div className="tests-placeholder">A sequence-diagram view will appear here.</div></section></section>;
+}
 function App() {
   const [state, setState]: [LoadStateT, React.Dispatch<React.SetStateAction<LoadStateT>>] = useState<LoadStateT>({ status: 'loading' });
+  const [testsState, setTestsState]: [TestsLoadStateT, React.Dispatch<React.SetStateAction<TestsLoadStateT>>] = useState<TestsLoadStateT>({ status: 'loading' });
+  const [mode, setMode]: [ModeT, React.Dispatch<React.SetStateAction<ModeT>>] = useState<ModeT>('classes');
   useEffect(() => {
     const controller: AbortController = new AbortController();
     loadClassDetails(controller.signal).then((details: ClassDetails[]) => {
-      // UNTRUST-ALLOW-NULLISH: A server response can omit the requested class and Array.find returns undefined in that case; the guard produces a visible loading error.
-      const found: ClassDetails | undefined = details.find((item: ClassDetails) => item.name === 'ClassDiagram');
-      if (!found) { setState({ status: 'error' }); return; }
-      const text: string = classDetailsToText(found);
+      // UNTRUST-ALLOW-NULLISH: The server can return an empty inventory, and Array.at returns undefined in that case; a non-empty inventory deliberately opens its first class without assuming a ClassDiagram declaration exists.
+      const sourceClass: ClassDetails | undefined = details.at(0);
+      if (!sourceClass) { setState({ status: 'error' }); return; }
+      const text: string = classDetailsToText(sourceClass);
       const parsed: ParseResultT = parseDiagram(text);
       setState(parsed.ok ? {
         status: 'ready',
         text,
         diagram: parsed.diagram,
-        classes: details.filter((item: ClassDetails) => item.name !== found.name) } : { status: 'error' });
-    }).catch(() => { if (!controller.signal.aborted) setState({ status: 'error' }); });
+        classes: details.filter((item: ClassDetails) => item.name !== sourceClass.name) } : { status: 'error' });
+    }).catch((error: unknown) => { console.error('Class details request failed', error); if (!controller.signal.aborted) setState({ status: 'error' }); });
     return () => controller.abort();
   }, []);
-  if (state.status === 'loading') return <main role="status">Loading class details…</main>;
-  if (state.status === 'error') return <main role="alert">Could not load class details. Check that the server is running and reload.</main>;
-  return <Workspace initialText={state.text} initial={state.diagram} knownClasses={state.classes} />;
+  useEffect(() => {
+    const controller: AbortController = new AbortController();
+    loadTestsInventory(controller.signal).then((tests: TestCaseDetails[]) => {
+      if (!controller.signal.aborted) setTestsState({ status: 'ready', tests });
+    }).catch((error: unknown) => { console.error('Tests inventory request failed', error); if (!controller.signal.aborted) setTestsState({ status: 'error' }); });
+    return () => controller.abort();
+  }, []);
+  return <main><Topbar mode={mode} onModeChange={setMode} />{mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace initialText={state.text} initial={state.diagram} knownClasses={state.classes} /> : testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} />}</main>;
 }
 
 // UNTRUST-ALLOW-NULLISH: The browser DOM API returns null when the mount element is absent; the following guard prevents passing an absent element to React and does not expose that value outside this boundary.

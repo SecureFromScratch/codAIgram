@@ -9,6 +9,7 @@ const PARAMETER: Decoration = Decoration.mark({ class: 'dsl-parameter' });
 const TYPE: Decoration = Decoration.mark({ class: 'dsl-type' });
 const KEYWORD: Decoration = Decoration.mark({ class: 'dsl-type-keyword' });
 const PUNCTUATION: Decoration = Decoration.mark({ class: 'dsl-punctuation' });
+const RELATION_KEYWORDS: ReadonlySet<string> = new Set<string>(['OWNS', 'REF', 'UNK']);
 function error(message: string): Decoration { return Decoration.mark({ class: 'dsl-error', attributes: { title: message } }); }
 const MISSING_CLASS: Decoration = Decoration.line({ attributes: { class: 'dsl-missing-class' } });
 const BUILTIN_TYPES: ReadonlySet<string> = new Set(['string', 'number', 'boolean', 'integer', 'void', 'unknown', 'any']);
@@ -35,15 +36,15 @@ function decorations(state: EditorState): DecorationSet {
       hasHeading = true;
       continue;
     }
-    const isOwnership: boolean = /^\s*OWNS\b/.test(text);
-    const startsMethod: boolean = parentheses === 0 && /^ {2}\S/.test(text) && !isOwnership;
+    const isRelationship: boolean = /^\s*(?:OWNS|REF|UNK)\b/.test(text);
+    const startsMethod: boolean = parentheses === 0 && /^ {2}\S/.test(text) && !isRelationship;
     const tokens: RegExpMatchArray[] = Array.from(text.matchAll(/[A-Za-z_][A-Za-z0-9_]*|[()[\]<>:,]/g));
     tokens.forEach((token: RegExpMatchArray, index: number) => {
       const value: string = token.at(0) ?? '';
       const position: number = token.index ?? 0;
       let mark: Decoration = PUNCTUATION;
       if (/^[A-Za-z_]/.test(value)) {
-        if (isOwnership && index === 0) mark = OWNERSHIP;
+        if (isRelationship && index === 0 && RELATION_KEYWORDS.has(value)) mark = OWNERSHIP;
         else if (startsMethod && index === 0) mark = METHOD_NAME;
         else if (BUILTIN_TYPES.has(value)) mark = KEYWORD;
         else if (typeContext) mark = TYPE;
@@ -54,10 +55,10 @@ function decorations(state: EditorState): DecorationSet {
       else if (value === '<') genericDepth++;
       else if (value === '>') genericDepth = Math.max(0, genericDepth - 1);
       else if (value === ',' && genericDepth === 0) typeContext = false;
-      if (!isOwnership && value === '(') parentheses++;
-      else if (!isOwnership && value === ')') parentheses = Math.max(0, parentheses - 1);
+      if (!isRelationship && value === '(') parentheses++;
+      else if (!isRelationship && value === ')') parentheses = Math.max(0, parentheses - 1);
     });
-    if (isOwnership || parentheses === 0) { typeContext = false; genericDepth = 0; }
+    if (isRelationship || parentheses === 0) { typeContext = false; genericDepth = 0; }
   }
   return builder.finish();
 }
@@ -90,17 +91,17 @@ function errors(state: EditorState, hiddenNames: readonly string[]): DecorationS
       if (hiddenNames.includes(text)) { const start: number = line.text.indexOf(text); builder.add(line.from + start, line.from + start + text.length, error(`Class ${text} already exists. Type @ to edit it.`)); }
       hasHeading = true; names.add(text); blank = false; continue;
     }
-    if (!/^\s/.test(line.text) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text) && text !== 'OWNS') {
+    if (!/^\s/.test(line.text) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text) && !RELATION_KEYWORDS.has(text)) {
       const message: string = names.has(text) ? `Duplicate class name: ${text}.` : hiddenNames.includes(text) ? `Class ${text} already exists. Type @ to edit it.` : 'Separate classes with a blank line.';
       if (!blank || names.has(text) || hiddenNames.includes(text)) builder.add(line.from, line.to, error(message));
       names.add(text); blank = false; continue;
     }
     blank = false;
-    const malformed: boolean = !/^\s/.test(line.text) && !/^OWNS\b/.test(text) && /^[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:/.test(text);
-    const missingType: boolean = /^OWNS\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*$/.test(text);
+    const malformed: boolean = !/^\s/.test(line.text) && !/^(?:OWNS|REF|UNK)\b/.test(text) && /^[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:/.test(text);
+    const missingType: boolean = /^(?:OWNS|REF|UNK)\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*$/.test(text);
     if (malformed || missingType) {
       const start: number = line.text.indexOf(text);
-      builder.add(line.from + start, line.from + start + text.length, error(missingType ? 'Enter the owned class type.' : 'Expected OWNS before the ownership declaration.'));
+      builder.add(line.from + start, line.from + start + text.length, error(missingType ? 'Enter the related class type.' : 'Expected OWNS, REF, or UNK before the relationship declaration.'));
     }
     if (/^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(text)) {
       const parts: string[] = [line.text];

@@ -5,4 +5,4 @@ readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 npx tsc -p scanner/tsconfig.json
-exec node scanner/dist/index.js server codaigram-server --types test --server-url http://127.0.0.1:3001
+exec node scanner/dist/index.js codaigram-server server,shared --types class --server-url http://127.0.0.1:3001

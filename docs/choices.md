@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | Source of truth | In-memory class document | Retains class definitions when the editor shows only a selection or is empty; graph and editor are views. Implemented locally. |
 | Frontend | React, TypeScript, CodeMirror 6 | Component and editor transaction model; implemented. |
+| Shared infrastructure | npm workspace package `@codaigram/shared` | Gives the scanner, server, and client the same imports and runtime implementation. |
 | Graph | JointJS Community | Graph model and rendering fit a projection adapter; implemented for this preview. Review MPL obligations before distribution. |
 | Parser | Lezer | Incremental editor parsing is the target; the first preview uses a small standalone parser. Exact grammar remains open. |
 | Collaboration | Yjs text plus separate visual overrides | Designed for concurrent text and layout state; planned, not implemented. |

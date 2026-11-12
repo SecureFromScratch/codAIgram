@@ -5,8 +5,8 @@
     "restrictedBrowserApis": [
         { 
             "symbol": "fetch", 
-            "message": "Use the class-details HTTP boundary.", 
-            "allowPaths": ["client/src/class-details.ts"] 
+            "message": "Use loggedFetch for HTTP requests.",
+            "allowPaths": ["client/src/utils.ts"]
         }, { 
             "symbol": "window.setTimeout", 
             "message": "Use the owned click timer.", 
