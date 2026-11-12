@@ -1,0 +1,16 @@
+{
+  "name": "@codaigram/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./class-types": {
+      "types": "./dist/class-types.d.ts",
+      "default": "./dist/class-types.js"
+    },
+    "./json-map": {
+      "types": "./dist/json-map.d.ts",
+      "default": "./dist/json-map.js"
+    }
+  }
+}
