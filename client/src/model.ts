@@ -55,7 +55,7 @@ export function parseDiagram(text: string): ParseResultT {
     if (!parsed.ok) failure = parsed;
     const diagram: Diagram | undefined = parsed.diagram;
     if (!diagram) return { ok: false, message: 'Start with a class name.' };
-    if (classes.some((item: Diagram): boolean => item.title === diagram.title)) return {
+    if (classes.some((item: Diagram) => item.title === diagram.title)) return {
       ok: false,
       message: `Duplicate class name: ${diagram.title}.` };
     classes.push(diagram);
@@ -75,7 +75,7 @@ export function parseDiagram(text: string): ParseResultT {
 }
 
 function parseClass(text: string): ParseResultT {
-  const lines: string[] = text.split(/\r?\n/).filter((line: string): boolean => line.trim().length > 0);
+  const lines: string[] = text.split(/\r?\n/).filter((line: string) => line.trim().length > 0);
   const title: string = (lines.at(0) ?? '').trim();
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(title)) return { ok: false, message: 'Start with a class name.' };
   const members: string[] = [];

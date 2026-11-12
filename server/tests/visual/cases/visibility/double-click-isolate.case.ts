@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerDoubleClickIsolateCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
@@ -22,9 +22,9 @@ export function registerDoubleClickIsolateCase(): void {
       .filter({ hasText: "isPartial" });
     await target.dblclick();
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === "Class\n  isPartial: bool",
     );
     assert.equal(await page.locator("[data-eye-badge]").count(), 1);

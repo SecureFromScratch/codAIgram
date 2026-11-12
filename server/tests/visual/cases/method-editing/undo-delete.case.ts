@@ -15,7 +15,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerUndoDeleteMethodCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     const methodLine: import("playwright").Locator = editor
@@ -28,7 +28,7 @@ export function registerUndoDeleteMethodCase(): void {
     await page.keyboard.press("Shift+End");
     assert.equal(
       await page.evaluate(
-        (): string => window.getSelection()?.toString() ?? "",
+        () => window.getSelection()?.toString() ?? "",
       ),
       "  addClass(name: string, publicMethods: string[])",
     );
@@ -40,9 +40,9 @@ export function registerUndoDeleteMethodCase(): void {
     ]);
     await page.keyboard.press("Control+z");
     await page.waitForFunction(
-      (expected: string): boolean =>
+      (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === expected,
       text,
     );

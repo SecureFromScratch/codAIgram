@@ -12,6 +12,6 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
 
 export function registerRejectMethodCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    ['Diagram\nadd()', 'Diagram\n   add()', 'Diagram\n  add(\n  first: string)', 'Diagram\n  add('].forEach((text: string): void => { expect(parseDiagram(text)).toMatchObject({ ok: false }); });
+    ['Diagram\nadd()', 'Diagram\n   add()', 'Diagram\n  add(\n  first: string)', 'Diagram\n  add('].forEach((text: string) => { expect(parseDiagram(text)).toMatchObject({ ok: false }); });
   });
 }

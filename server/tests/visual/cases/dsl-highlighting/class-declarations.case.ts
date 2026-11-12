@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerClassDeclarationHighlightingCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     const source: string = `${text}\n\nModification\n  by: string\n  at: datetime\n\nModificationHistory\n  modifications: Modification[]\n  push(newModification: Modification)\n\nPartial`;
@@ -27,16 +27,9 @@ export function registerClassDeclarationHighlightingCase(): void {
     }[] = await editor.locator(".cm-line").evaluateAll(
       (
         lines: readonly Element[],
-      ): readonly {
-        readonly name: string | null;
-        readonly marked: string | null;
-        readonly color: string | undefined;
-        readonly weight: string | undefined;
-        readonly italic: string | undefined;
-        readonly decoration: string | undefined;
-      }[] =>
+      ) =>
         lines
-          .filter((line: Element): boolean =>
+          .filter((line: Element) =>
             /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.textContent ?? ""),
           )
           .map((line: Element) => {

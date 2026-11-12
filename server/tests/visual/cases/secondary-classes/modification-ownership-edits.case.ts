@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerModificationOwnershipEditsCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     await verifySecondaryClassOwnershipEdits(
       getSecondaryClassFixture("Modification"),
     );

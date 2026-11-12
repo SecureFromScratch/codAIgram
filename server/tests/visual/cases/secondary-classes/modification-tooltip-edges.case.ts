@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerModificationTooltipEdgesCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     await verifySecondaryClassTooltipEdges(
       getSecondaryClassFixture("Modification"),
     );

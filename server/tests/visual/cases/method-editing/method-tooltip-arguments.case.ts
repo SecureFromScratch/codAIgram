@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMethodTooltipArgumentsCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(
@@ -26,7 +26,7 @@ export function registerMethodTooltipArgumentsCase(): void {
       '.joint-type-standard-headeredrectangle [data-method-tooltip^="addClass("]',
     );
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector('[data-method-tooltip^="addClass("]')
           ?.getAttribute("data-method-tooltip") ===

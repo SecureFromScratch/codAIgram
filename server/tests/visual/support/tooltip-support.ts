@@ -8,7 +8,7 @@ export async function checkTooltipAtPanelEdge(
   try {
     const canvas: import("playwright").Locator = page.locator(".canvas");
     await canvas.evaluate(
-      (element: Element, edgeName: TooltipPanelEdgeT): void => {
+      (element: Element, edgeName: TooltipPanelEdgeT) => {
         const box: Element | null = element.querySelector(
           ".joint-type-standard-headeredrectangle rect",
         );
@@ -29,11 +29,7 @@ export async function checkTooltipAtPanelEdge(
     } = await canvas.evaluate(
       (
         element: Element,
-      ): {
-        readonly topGap: number;
-        readonly bottomGap: number;
-        readonly scrollTop: number;
-      } => {
+      ) => {
         const box: Element | null = element.querySelector(
           ".joint-type-standard-headeredrectangle rect",
         );
@@ -68,15 +64,7 @@ export async function checkTooltipAtPanelEdge(
     } = await tooltip.evaluate(
       (
         element: HTMLElement,
-      ): {
-        readonly tip: DOMRect;
-        readonly panel: DOMRect;
-        readonly width: number;
-        readonly height: number;
-        readonly scrollHeight: number;
-        readonly clientHeight: number;
-        readonly text: string;
-      } => {
+      ) => {
         const panel: Element | null = element.closest(".graph-pane");
         if (panel === null) throw new Error("Expected the graph pane.");
         return {
@@ -117,7 +105,7 @@ export async function checkTooltipAtPanelEdge(
     );
   } finally {
     await page.setViewportSize({ width: 1600, height: 1000 });
-    await page.locator(".canvas").evaluate((element: Element): void => {
+    await page.locator(".canvas").evaluate((element: Element) => {
       element.scrollTop = 0;
     });
     await page.mouse.move(2, 2);

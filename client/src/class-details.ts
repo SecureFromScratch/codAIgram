@@ -25,7 +25,7 @@ export async function loadClassDetails(signal: AbortSignal): Promise<ClassDetail
 
 function isClassDetails(value: unknown): value is ClassDetails {
   // UNTRUST-ALLOW-NULLISH: JSON from the HTTP boundary may contain null; this guard excludes it before checking properties and admitting a value into the application.
-  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every((method: unknown): boolean => typeof method === 'string') && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isRelation);
+  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every((method: unknown) => typeof method === 'string') && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isRelation);
 }
 
 function isRelation(value: unknown): value is ClassDetails['relations'][number] {
@@ -34,5 +34,5 @@ function isRelation(value: unknown): value is ClassDetails['relations'][number] 
 }
 
 export function classDetailsToText(details: ClassDetails): string {
-  return [details.name, ...details.methods.map((method: string): string => `  ${method}`), ...details.relations.map((relation: ClassDetails['relations'][number]): string => `${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`)].join('\n');
+  return [details.name, ...details.methods.map((method: string) => `  ${method}`), ...details.relations.map((relation: ClassDetails['relations'][number]) => `${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`)].join('\n');
 }

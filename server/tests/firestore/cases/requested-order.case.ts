@@ -18,7 +18,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerRequestedOrderCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const database: FirebaseFirestore.Firestore = createLocalFirestore();
     const collection: string = `codaigram_test_${randomUUID().replaceAll("-", "")}`;
     try {
@@ -41,7 +41,7 @@ export function registerRequestedOrderCase(): void {
           "127.0.0.1",
         );
       try {
-        await new Promise<void>((resolve): void =>
+        await new Promise<void>((resolve) =>
           server.once("listening", resolve),
         );
         const address: ReturnType<typeof server.address> = server.address();
@@ -58,12 +58,12 @@ export function registerRequestedOrderCase(): void {
         );
         const result: readonly { readonly name: string; }[] = (await response.json()) as readonly { readonly name: string; }[];
         assert.deepEqual(
-          result.map((item): string => item.name),
+          result.map((item) => item.name),
           ["Class", "ClassDiagram", "Class"],
         );
       } finally {
-        await new Promise<void>((resolve, reject): void =>
-          server.close((error?: Error): void =>
+        await new Promise<void>((resolve, reject) =>
+          server.close((error?: Error) =>
             error === undefined ? resolve() : reject(error),
           ),
         );

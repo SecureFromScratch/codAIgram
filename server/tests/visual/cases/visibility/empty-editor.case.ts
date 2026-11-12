@@ -14,7 +14,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerEmptyEditorCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill("");
@@ -25,9 +25,9 @@ export function registerEmptyEditorCase(): void {
     );
     await page.locator(".joint-type-standard-headeredrectangle").click();
     await page.waitForFunction(
-      (expected: string): boolean =>
+      (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === expected,
       text,
     );

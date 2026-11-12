@@ -45,6 +45,6 @@ export function formatMember(member: string): MemberDisplay {
     names.push(parameterName);
     parameters.push({ name: parameterName, type });
   }
-  const tooltip: string = [`${name}(${names.join(', ')})`, ...parameters.map((parameter: Parameter): string => `-${parameter.name}: ${parameter.type}`)].join('\n');
+  const tooltip: string = [`${name}(${names.join(', ')})`, ...parameters.map((parameter: Parameter) => `-${parameter.name}: ${parameter.type}`)].join('\n');
   return { text: name, tooltip, parameters };
 }

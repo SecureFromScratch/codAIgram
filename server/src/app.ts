@@ -21,7 +21,7 @@ type ClassNameDefinitionT = ClassMethodDefinitionT;
 
 const classNameDefinition: ClassNameDefinitionT = {
   archetype: regexString({
-    normalize: (value: string): string => value.trim(),
+    normalize: (value: string) => value.trim(),
     bounds: { minimum: 1, maximum: 100 },
     pattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
     validateAdditional: noAdditionalValidation }),
@@ -34,7 +34,7 @@ type ClassNameT = typeof CLASS_NAME.ClassName;
 // VV currently has no built-in boolean archetype; this checks the primitive exactly, without coercion.
 const BOOLEAN: ReturnType<typeof defineUncheckedCustomArchetype<boolean>> = defineUncheckedCustomArchetype<boolean>({
   kind: 'codaigram.boolean',
-  validate: (input: unknown): ValidationResult<boolean> => typeof input === 'boolean' ? { success: true, value: input } : {
+  validate: (input: unknown) => typeof input === 'boolean' ? { success: true, value: input } : {
     success: false,
     issues: [issue('boolean.invalid', 'Expected a boolean.')] } });
 type BooleanValueDefinitionT = {
@@ -44,7 +44,7 @@ type BooleanValueDefinitionT = {
 };
 const methodDefinition: ClassMethodDefinitionT = {
   archetype: regexString({
-    normalize: (value: string): string => value,
+    normalize: (value: string) => value,
     bounds: { minimum: 1, maximum: 1000 },
     pattern: /^[\x20-\x7e]+$/,
     validateAdditional: noAdditionalValidation }),
@@ -53,7 +53,7 @@ const methodDefinition: ClassMethodDefinitionT = {
 };
 const relationNameDefinition: RelationNameDefinitionT = {
   archetype: regexString({
-    normalize: (value: string): string => value,
+    normalize: (value: string) => value,
     bounds: { minimum: 0, maximum: 100 },
     pattern: /^(?:[A-Za-z_][A-Za-z0-9_]*)?$/,
     validateAdditional: noAdditionalValidation }),
@@ -62,7 +62,7 @@ const relationNameDefinition: RelationNameDefinitionT = {
 };
 const relationKindDefinition: RelationKindDefinitionT = {
   archetype: regexString({
-    normalize: (value: string): string => value,
+    normalize: (value: string) => value,
     bounds: { minimum: 4, maximum: 4 },
     pattern: /^OWNS$/,
     validateAdditional: noAdditionalValidation }),
@@ -124,25 +124,25 @@ export function createApp(repository: ClassRepository): ReturnType<typeof expres
   app.post('/api/classesDetails', {
     body: object({
       classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }) }) }, async (request, response) => {
-    const names: string[] = request.body.classNames.map((className: InferValue<ClassNameT>): string => className.exposeUnchecked());
+    const names: string[] = request.body.classNames.map((className: InferValue<ClassNameT>) => className.exposeUnchecked());
     const details: ClassDetails[] = await repository.getDetails(names);
     response.json(details);
   });
   app.post('/api/updateClasses', { body: array(CLASS_DETAILS, { minimum: 1, maximum: 100 }) }, async (request, response) => {
-    const details: ClassDetails[] = request.body.map((item): ClassDetails => ({
+    const details: ClassDetails[] = request.body.map((item) => ({
       name: item.name.exposeUnchecked(),
-      methods: item.methods.map((method): string => method.exposeUnchecked()),
-      relations: item.relations.map((relation): ClassDetails['relations'][number] => ({
+      methods: item.methods.map((method) => method.exposeUnchecked()),
+      relations: item.relations.map((relation) => ({
         kind: 'OWNS',
         name: relation.name.exposeUnchecked(),
         target: relation.target.exposeUnchecked(),
         many: relation.many.exposeUnchecked() })),
       isPartial: item.isPartial.exposeUnchecked() }));
-    if (new Set(details.map((item: ClassDetails): string => item.name)).size !== details.length) throw new DuplicateClassError();
+    if (new Set(details.map((item: ClassDetails) => item.name)).size !== details.length) throw new DuplicateClassError();
     await repository.updateClasses(details);
     response.json({ updated: details.length });
   });
-  app.use(express.trustedMiddleware((error: unknown, _request: unknown, response: Parameters<Parameters<ReturnType<typeof express>['get']>[2]>[1], _next: (error: unknown) => void): void => {
+  app.use(express.trustedMiddleware((error: unknown, _request: unknown, response: Parameters<Parameters<ReturnType<typeof express>['get']>[2]>[1], _next: (error: unknown) => void) => {
     if (error instanceof Error && 'status' in error && error.status === 413) {
       response.status(413).json({ error: 'Request is too large.' });
     } else if (error instanceof RequestValidationError || error instanceof DuplicateClassError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {

@@ -5,13 +5,13 @@ export async function waitForMethodNames(
   names: readonly string[],
 ): Promise<void> {
   await page.waitForFunction(
-    (expected: readonly string[]): boolean =>
+    (expected: readonly string[]) =>
       JSON.stringify(
         [
           ...document.querySelectorAll(
             ".joint-type-standard-headeredrectangle [data-method-index]",
           ),
-        ].map((item: Element): string | null => item.textContent),
+        ].map((item: Element) => item.textContent),
       ) === JSON.stringify(expected),
     names,
   );
@@ -30,11 +30,7 @@ export async function assertRedWavyError(
   } = await errors.first().evaluate(
     (
       element: HTMLElement,
-    ): {
-      readonly line: string;
-      readonly style: string;
-      readonly color: string;
-    } => ({
+    ) => ({
       line: getComputedStyle(element).textDecorationLine,
       style: getComputedStyle(element).textDecorationStyle,
       color: getComputedStyle(element).textDecorationColor,

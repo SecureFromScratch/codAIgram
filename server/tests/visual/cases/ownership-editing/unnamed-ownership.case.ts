@@ -17,7 +17,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerUnnamedOwnershipCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(text.replace("OWNS classes: Class[]", "OWNS Class[]"));

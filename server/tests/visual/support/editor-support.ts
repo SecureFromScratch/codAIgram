@@ -17,10 +17,10 @@ export async function waitForLinkLabels(
   labels: readonly string[],
 ): Promise<void> {
   await page.waitForFunction(
-    (expected: readonly string[]): boolean =>
+    (expected: readonly string[]) =>
       JSON.stringify(
         [...document.querySelectorAll(".joint-link text")].map(
-          (item: Element): string | null => item.textContent,
+          (item: Element) => item.textContent,
         ),
       ) === JSON.stringify(expected),
     labels,

@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerPreserveHiddenDefinitionsCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
@@ -22,16 +22,16 @@ export function registerPreserveHiddenDefinitionsCase(): void {
       .filter({ hasText: "isPartial" })
       .dblclick();
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector(".cm-content")
           ?.textContent?.includes("isPartial") === true,
     );
     await editor.fill("Class\n  isComplete: bool");
-    await page.waitForFunction((): boolean =>
+    await page.waitForFunction(() =>
       [
         ...document.querySelectorAll(".joint-type-standard-headeredrectangle"),
-      ].some((item: Element): boolean =>
+      ].some((item: Element) =>
         (item.textContent ?? "").includes("isComplete"),
       ),
     );
@@ -41,7 +41,7 @@ export function registerPreserveHiddenDefinitionsCase(): void {
     assert.equal(await hidden.count(), 1);
     await hidden.click();
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector(".cm-content")
           ?.textContent?.includes("addPartialClass") === true,

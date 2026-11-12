@@ -13,14 +13,14 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerLongLinesAndContinuationsCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const editor: import("playwright").Locator = page.getByRole("textbox", { name: "Diagram text", });
     const longName: string = "a".repeat(180);
     await editor.fill(
       `Diagram\n  f(\n    name: string,\n\n      count: integer\n    )\n  ${longName}()\nOWNS classes: Class[]`,
     );
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector(".status")
           ?.textContent?.includes("up to date") === true,
@@ -44,12 +44,7 @@ export function registerLongLinesAndContinuationsCase(): void {
       .evaluate(
         (
           line: HTMLElement,
-        ): {
-          readonly width: number;
-          readonly height: number;
-          readonly whiteSpace: string;
-          readonly viewport: number;
-        } => {
+        ) => {
           const scroller: HTMLElement | null =
             line.closest<HTMLElement>(".cm-scroller");
           if (scroller === null) throw new Error("Expected editor scroller.");
@@ -71,7 +66,7 @@ export function registerLongLinesAndContinuationsCase(): void {
     );
     await editor.fill("Diagram\n  f(\n  name: string)");
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector(".status")
           ?.textContent?.includes("continuation") === true,

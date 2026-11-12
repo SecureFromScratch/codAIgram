@@ -11,9 +11,9 @@ export async function verifyReferencedHiddenPartial(
   await editor.fill(`${owner}\n\n${name}`);
   await page.locator('[data-class-name="ClassDiagram"]').dblclick();
   await page.waitForFunction(
-    (expected: string): boolean =>
+    (expected: string) =>
       [...document.querySelectorAll(".cm-content .cm-line")]
-        .map((line: Element): string | null => line.textContent)
+        .map((line: Element) => line.textContent)
         .join("\n") === expected,
     owner,
   );
@@ -21,7 +21,7 @@ export async function verifyReferencedHiddenPartial(
   assert.equal(await editor.locator(".dsl-error").count(), 0);
   await editor.fill(`${owner}\n\n${name}\n  added()`);
   await page.waitForFunction(
-    (className: string): boolean =>
+    (className: string) =>
       document
         .querySelector(`[data-class-name="${className}"]`)
         ?.textContent?.includes("added") === true,

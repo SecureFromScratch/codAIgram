@@ -18,7 +18,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerPersistAndReadCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const database: FirebaseFirestore.Firestore = createLocalFirestore();
     const collection: string = `codaigram_test_${randomUUID().replaceAll("-", "")}`;
     const added: {
@@ -52,7 +52,7 @@ export function registerPersistAndReadCase(): void {
           "127.0.0.1",
         );
       try {
-        await new Promise<void>((resolve): void =>
+        await new Promise<void>((resolve) =>
           server.once("listening", resolve),
         );
         const address: ReturnType<typeof server.address> = server.address();
@@ -82,8 +82,8 @@ export function registerPersistAndReadCase(): void {
         });
         assert.deepEqual(await read.json(), [added, changed]);
       } finally {
-        await new Promise<void>((resolve, reject): void =>
-          server.close((error?: Error): void =>
+        await new Promise<void>((resolve, reject) =>
+          server.close((error?: Error) =>
             error === undefined ? resolve() : reject(error),
           ),
         );

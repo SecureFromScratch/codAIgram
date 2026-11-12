@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerReferencedPartialClassesCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     const references: string = `${text}\n  property: PropertyType\n  use(value: ArgumentType)\nOWNS owned: OwnedType[]`;
@@ -39,7 +39,7 @@ export function registerReferencedPartialClassesCase(): void {
         );
         await editor.fill(`${source}\n  added()`);
         await page.waitForFunction(
-          (className: string): boolean =>
+          (className: string) =>
             document
               .querySelector(`[data-class-name="${className}"]`)
               ?.textContent?.includes("added") === true,

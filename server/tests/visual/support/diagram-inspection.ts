@@ -18,7 +18,7 @@ export type DiagramInspectionT = {
   readonly target: BoundsT;
 };
 export async function inspectDiagram(): Promise<DiagramInspectionT> {
-  return page.evaluate((): DiagramInspectionT => {
+  return page.evaluate(() => {
     const source: Element | null = document.querySelector(
       ".joint-type-standard-headeredrectangle",
     );
@@ -45,7 +45,7 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       throw new Error("Expected a complete class box.");
     const bounds: (element: Element) => BoundsT = (
       element: Element,
-    ): BoundsT => {
+    ) => {
       const rectangle: DOMRect = element.getBoundingClientRect();
       return {
         left: rectangle.left,
@@ -60,7 +60,7 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
     const intersects: (first: BoundsT, second: BoundsT) => boolean = (
       first: BoundsT,
       second: BoundsT,
-    ): boolean =>
+    ) =>
       first.left < second.right &&
       first.right > second.left &&
       first.top < second.bottom &&
@@ -68,21 +68,21 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
     const inHeader: (string | null)[] = [
       ...document.querySelectorAll("svg text"),
     ]
-      .filter((element: Element): boolean =>
+      .filter((element: Element) =>
         intersects(bounds(element), header),
       )
-      .map((element: Element): string | null => element.textContent);
+      .map((element: Element) => element.textContent);
     const bodyValue: string = [...bodyText.querySelectorAll(":scope > tspan")]
-      .map((row: Element): string =>
+      .map((row: Element) =>
         [...row.childNodes]
-          .map((node: ChildNode): string =>
+          .map((node: ChildNode) =>
             node.nodeName.toLowerCase() === "tspan"
               ? [...node.childNodes]
                   .filter(
-                    (child: ChildNode): boolean =>
+                    (child: ChildNode) =>
                       child.nodeType === Node.TEXT_NODE,
                   )
-                  .map((child: ChildNode): string | null => child.textContent)
+                  .map((child: ChildNode) => child.textContent)
                   .join("")
               : (node.textContent ?? ""),
           )

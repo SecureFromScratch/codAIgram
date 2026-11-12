@@ -13,11 +13,11 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerInvalidUpdateCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
       createApp(new MemoryClassRepository()).listen(0, "127.0.0.1");
     try {
-      await new Promise<void>((resolve): void =>
+      await new Promise<void>((resolve) =>
         server.once("listening", resolve),
       );
       const address: ReturnType<typeof server.address> = server.address();
@@ -32,8 +32,8 @@ export function registerInvalidUpdateCase(): void {
       );
       assert.equal(response.status, 400);
     } finally {
-      await new Promise<void>((resolve, reject): void =>
-        server.close((error?: Error): void =>
+      await new Promise<void>((resolve, reject) =>
+        server.close((error?: Error) =>
           error === undefined ? resolve() : reject(error),
         ),
       );

@@ -25,7 +25,7 @@ export const SECONDARY_CLASSES: readonly SecondaryClassFixtureT[] = [
 ];
 export function getSecondaryClassFixture(name: string): SecondaryClassFixtureT {
   const fixture: SecondaryClassFixtureT | undefined = SECONDARY_CLASSES.find(
-    (item: SecondaryClassFixtureT): boolean => item.name === name,
+    (item: SecondaryClassFixtureT) => item.name === name,
   );
   if (fixture === undefined)
     throw new Error(`No secondary class fixture named ${name}.`);
@@ -37,7 +37,7 @@ export async function isolateSecondaryClass(
   const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
     await resetOwnershipEditor();
   await editor.fill(
-    `${text}\n\n${SECONDARY_CLASSES.map((item: SecondaryClassFixtureT): string => item.source).join("\n\n")}`,
+    `${text}\n\n${SECONDARY_CLASSES.map((item: SecondaryClassFixtureT) => item.source).join("\n\n")}`,
   );
   const target: import("playwright").Locator = page.locator(
     `[data-class-name="${name}"]`,
@@ -46,9 +46,9 @@ export async function isolateSecondaryClass(
   await target.dblclick();
   const selected: SecondaryClassFixtureT = getSecondaryClassFixture(name);
   await page.waitForFunction(
-    (expected: string): boolean =>
+    (expected: string) =>
       [...document.querySelectorAll(".cm-content .cm-line")]
-        .map((line: Element): string | null => line.textContent)
+        .map((line: Element) => line.textContent)
         .join("\n") === expected,
     selected.source,
   );

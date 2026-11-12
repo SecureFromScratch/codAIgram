@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMethodAreaCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const data: Awaited<ReturnType<typeof inspectDiagram>> =
       await inspectDiagram();
     {

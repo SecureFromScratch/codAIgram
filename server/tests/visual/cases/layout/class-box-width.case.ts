@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerClassBoxWidthCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const widths: { readonly source: number; readonly target: number; } = await page.evaluate(() => {
       const source: Element | null = document.querySelector(
         ".joint-type-standard-headeredrectangle rect",

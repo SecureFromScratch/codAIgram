@@ -12,6 +12,6 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
 
 export function registerRejectSeparatorCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    ['Diagram\n  f()\nClass\n  x: bool', 'Diagram\n  property bool', 'Diagram\n  property:', 'Diagram\n\nDiagram'].forEach((text: string): void => { expect(parseDiagram(text)).toMatchObject({ ok: false }); });
+    ['Diagram\n  f()\nClass\n  x: bool', 'Diagram\n  property bool', 'Diagram\n  property:', 'Diagram\n\nDiagram'].forEach((text: string) => { expect(parseDiagram(text)).toMatchObject({ ok: false }); });
   });
 }

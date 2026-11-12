@@ -14,13 +14,13 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMissingOwnedNonpartialCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
-    await page.route("**/api/classesDetails", async (route): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
+    await page.route("**/api/classesDetails", async (route) => {
       const response: import("playwright").APIResponse = await route.fetch();
       const body: { name: string; isPartial: boolean; }[] = await response.json();
       const target:
         | { name: string; isPartial: boolean; }
-        | undefined = body.find((item): boolean => item.name === "Class");
+        | undefined = body.find((item) => item.name === "Class");
       if (target === undefined)
         throw new Error("Expected the Class details response.");
       target.isPartial = false;
@@ -30,10 +30,10 @@ export function registerMissingOwnedNonpartialCase(): void {
       const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
         await resetOwnershipEditor();
       await editor.fill(text.replace("OWNS classes: Class[]", "OWNS classes:"));
-      await page.waitForFunction((): boolean =>
+      await page.waitForFunction(() =>
         [
           ...document.querySelectorAll(".joint-type-standard-rectangle text"),
-        ].some((item: Element): boolean => item.textContent === "?"),
+        ].some((item: Element) => item.textContent === "?"),
       );
       const targets: string[] = await page
         .locator(".joint-type-standard-rectangle text")

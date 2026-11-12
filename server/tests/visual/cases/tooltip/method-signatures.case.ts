@@ -12,12 +12,12 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMethodSignaturesCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const source: "Diagram\n  f(name: string, items: string[])\n  g(count: integer)\n  empty()\nOWNS classes: Class[]" =
       "Diagram\n  f(name: string, items: string[])\n  g(count: integer)\n  empty()\nOWNS classes: Class[]";
     await page.getByRole("textbox", { name: "Diagram text" }).fill(source);
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document.querySelector(".joint-type-standard-headeredrectangle text")
           ?.textContent === "Diagram",
     );
@@ -62,13 +62,7 @@ export function registerMethodSignaturesCase(): void {
     } = await page.getByRole("tooltip").evaluate(
       (
         element: HTMLElement,
-      ): {
-        readonly weight: string;
-        readonly parentheses: string;
-        readonly names: readonly string[];
-        readonly details: readonly string[];
-        readonly text: string;
-      } => {
+      ) => {
         const signature: HTMLElement | null =
           element.querySelector<HTMLElement>(".tooltip-signature");
         if (signature === null)
@@ -91,10 +85,10 @@ export function registerMethodSignaturesCase(): void {
           weight: getComputedStyle(signature).fontWeight,
           parentheses: getComputedStyle(parentheses).color,
           names: signatureNames.map(
-            (name: HTMLElement): string => getComputedStyle(name).color,
+            (name: HTMLElement) => getComputedStyle(name).color,
           ),
           details: detailNames.map(
-            (name: HTMLElement): string => getComputedStyle(name).color,
+            (name: HTMLElement) => getComputedStyle(name).color,
           ),
           text: element.innerText,
         };
@@ -138,13 +132,13 @@ export function registerMethodSignaturesCase(): void {
     );
     const seven: string = Array.from(
       { length: 7 },
-      (_, index): string => `arg${index}: string`,
+      (_, index) => `arg${index}: string`,
     ).join(", ");
     await page
       .getByRole("textbox", { name: "Diagram text" })
       .fill(`Palette\n  f(${seven})\nOWNS classes: Class[]`);
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document.querySelector(".joint-type-standard-headeredrectangle text")
           ?.textContent === "Palette",
     );
@@ -154,9 +148,9 @@ export function registerMethodSignaturesCase(): void {
     const colors: readonly string[] = await page
       .getByRole("tooltip")
       .locator('.tooltip-signature [class^="argument-color-"]')
-      .evaluateAll((elements: readonly HTMLElement[]): readonly string[] =>
+      .evaluateAll((elements: readonly HTMLElement[]) =>
         elements.map(
-          (element: HTMLElement): string => getComputedStyle(element).color,
+          (element: HTMLElement) => getComputedStyle(element).color,
         ),
       );
     assert.equal(

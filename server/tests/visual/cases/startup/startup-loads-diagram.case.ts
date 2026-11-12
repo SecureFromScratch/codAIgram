@@ -12,9 +12,9 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerStartupLoadsDiagramCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const request: Promise<import("playwright").Request> = page.waitForRequest(
-      (requestValue): boolean =>
+      (requestValue) =>
         requestValue.url().endsWith("/api/classesDetails") &&
         requestValue.method() === "POST",
     );

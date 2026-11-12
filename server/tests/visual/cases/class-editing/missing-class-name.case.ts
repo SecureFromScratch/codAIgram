@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMissingClassNameCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(text.replace(/^ClassDiagram/, ""));
@@ -27,12 +27,7 @@ export function registerMissingClassNameCase(): void {
     } = await missing.evaluate(
       (
         element: HTMLElement,
-      ): {
-        readonly content: string;
-        readonly line: string;
-        readonly style: string;
-        readonly color: string;
-      } => ({
+      ) => ({
         content: getComputedStyle(element, "::before").content,
         line: getComputedStyle(element, "::before").textDecorationLine,
         style: getComputedStyle(element, "::before").textDecorationStyle,

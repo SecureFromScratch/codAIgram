@@ -126,7 +126,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       cellViewNamespace: shapes,
       background: { color: '#f8fafc' } });
     const members: MemberDisplay[] = diagram.members.map(formatMember);
-    const rows: string[] = members.map((member: MemberDisplay): string => fitText(member.text, 176, '13px monospace'));
+    const rows: string[] = members.map((member: MemberDisplay) => fitText(member.text, 176, '13px monospace'));
     const annotations: {
       start: number;
       end: number;
@@ -136,7 +136,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         'aria-describedby': string;
         tabindex: number } }[] = [];
     let offset: number = 0;
-    members.forEach((member: MemberDisplay, index: number): void => {
+    members.forEach((member: MemberDisplay, index: number) => {
       const row: string = rows.at(index) ?? '';
       annotations.push({
         start: offset,
@@ -172,18 +172,18 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         y: 42,
         textVerticalAnchor: 'top' } });
     source.addTo(graph);
-    const nodeNames: Set<string> = new Set(diagram.targets.map((relation: Relation): string => relation.target));
-    (diagram.classes ?? []).forEach((item: Diagram): void => { item.targets.forEach((relation: Relation): void => { nodeNames.add(relation.target); }); });
+    const nodeNames: Set<string> = new Set(diagram.targets.map((relation: Relation) => relation.target));
+    (diagram.classes ?? []).forEach((item: Diagram) => { item.targets.forEach((relation: Relation) => { nodeNames.add(relation.target); }); });
     nodeNames.delete(diagram.title);
-    knownClasses.forEach((item: ClassDetails): void => { if (!item.isPartial || partialRetention === 'retain') nodeNames.add(item.name); });
+    knownClasses.forEach((item: ClassDetails) => { if (!item.isPartial || partialRetention === 'retain') nodeNames.add(item.name); });
     const nodes: Map<string, dia.Element> = new Map<string, dia.Element>();
     let memberOffset: number = diagram.members.length;
-    (diagram.classes ?? []).forEach((item: Diagram, index: number): void => {
+    (diagram.classes ?? []).forEach((item: Diagram, index: number) => {
       if (item.members.length === 0 && item.targets.length === 0) { nodeNames.add(item.title); return; }
       nodeNames.delete(item.title);
       const full: shapes.standard.HeaderedRectangle = new shapes.standard.HeaderedRectangle();
       const entries: MemberDisplay[] = item.members.map(formatMember);
-      const rows: string[] = entries.map((entry: MemberDisplay): string => fitText(entry.text, 176, '13px monospace'));
+      const rows: string[] = entries.map((entry: MemberDisplay) => fitText(entry.text, 176, '13px monospace'));
       const annotations: {
         start: number;
         end: number;
@@ -193,7 +193,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
           'aria-describedby': string;
           tabindex: number } }[] = [];
       let offset: number = 0;
-      entries.forEach((entry: MemberDisplay, entryIndex: number): void => {
+      entries.forEach((entry: MemberDisplay, entryIndex: number) => {
         const row: string = rows.at(entryIndex) ?? '';
         annotations.push({
           start: offset,
@@ -229,7 +229,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
           textVerticalAnchor: 'top' } });
       full.addTo(graph); nodes.set(item.title, full);
     });
-    Array.from(nodeNames).forEach((name: string, index: number): void => {
+    Array.from(nodeNames).forEach((name: string, index: number) => {
       const target: shapes.standard.Rectangle = new shapes.standard.Rectangle();
       target.position(400, 350 + index * 120); target.resize(150, 30);
       target.attr({
@@ -243,7 +243,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       nodes.set(name, target);
     });
     nodes.set(diagram.title, source);
-    nodes.forEach((node: dia.Element, name: string): void => {
+    nodes.forEach((node: dia.Element, name: string) => {
       const element: SVGElement = paper.findViewByModel(node).el as SVGElement;
       element.setAttribute('data-class-name', name);
       if (!visible.includes(name)) return;
@@ -258,7 +258,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       icon.appendChild(label); badge.appendChild(circle); badge.appendChild(icon); element.appendChild(badge);
     });
     const classes: Diagram[] = [diagram, ...(diagram.classes ?? [])];
-    classes.forEach((owner: Diagram): void => { owner.targets.forEach((relation: Relation): void => {
+    classes.forEach((owner: Diagram) => { owner.targets.forEach((relation: Relation) => {
       const ownerNode: dia.Element | undefined = nodes.get(owner.title);
       if (!ownerNode) return;
       // UNTRUST-ALLOW-NULLISH: Map lookup returns undefined for absent keys; guard the renderer against any inconsistent projection before creating a link.
@@ -304,7 +304,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       top: Math.max(8, bounds.bottom - parent.top + 6),
       anchorTop: bounds.top - parent.top });
   }
-  const allMembers: string[] = [...diagram.members, ...(diagram.classes ?? []).flatMap((item: Diagram): string[] => item.members)];
+  const allMembers: string[] = [...diagram.members, ...(diagram.classes ?? []).flatMap((item: Diagram) => item.members)];
   const member: MemberDisplay = tooltip.visible ? (allMembers.map(formatMember).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
   const clickTimer: React.RefObject<number> = useRef<number>(0);
   useEffect(() => () => window.clearTimeout(clickTimer.current), []);
@@ -313,7 +313,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
     return target.closest('[data-class-name]')?.getAttribute('data-class-name') ?? '';
   }
   return <div className="canvas-shell" onClick={event => { const name: string = selectedClass(event.target); if (!name) return; if (event.detail > 1) { window.clearTimeout(clickTimer.current); return; } window.clearTimeout(clickTimer.current); clickTimer.current = scheduleClick(() => onSelect(name, false)); }} onDoubleClick={event => { window.clearTimeout(clickTimer.current); const name: string = selectedClass(event.target); if (name) onSelect(name, true); }} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => setTooltip({ visible: false })} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => setTooltip({ visible: false })}>
-    <div className="canvas" role="img" aria-label={`Diagram of ${diagram.title} with ${diagram.targets.map((relation: Relation): string => relation.target).join(', ')}`} ref={host} />
+    <div className="canvas" role="img" aria-label={`Diagram of ${diagram.title} with ${diagram.targets.map((relation: Relation) => relation.target).join(', ')}`} ref={host} />
     {tooltip.visible && member ? <MethodTooltip member={member} left={tooltip.left} top={tooltip.top} anchorTop={tooltip.anchorTop} /> : ''}
   </div>;
 }
@@ -325,14 +325,14 @@ interface DocumentState {
 }
 
 function classBlocks(text: string): string[] {
-  return text.split(/\n[ \t]*\n(?=[A-Za-z_][A-Za-z0-9_]*[ \t]*(?:\n|$))/).map((block: string): string => block.trim()).filter((block: string): boolean => Boolean(block));
+  return text.split(/\n[ \t]*\n(?=[A-Za-z_][A-Za-z0-9_]*[ \t]*(?:\n|$))/).map((block: string) => block.trim()).filter((block: string) => Boolean(block));
 }
 
 function canCompletePartial(source: string, name: string, text: string): boolean {
     const partial: ParseResultT = parseDiagram(source);
   if (!partial.ok || partial.diagram.members.length > 0 || partial.diagram.targets.length > 0) return false;
   const pattern: RegExp = new RegExp(`(?:\\:\\s*|\\(\\s*|,\\s*|^OWNS\\s+)${name}(?=[^A-Za-z0-9_]|$)`);
-  return text.split(/\r?\n/).some((line: string): boolean => pattern.test(line));
+  return text.split(/\r?\n/).some((line: string) => pattern.test(line));
 }
 
 function Workspace({ initialText, initial, knownClasses }: {
@@ -348,7 +348,7 @@ function Workspace({ initialText, initial, knownClasses }: {
     validity: 'valid' });
   const [visible, setVisible]: [string[], React.Dispatch<React.SetStateAction<string[]>>] = useState<string[]>([initial.title]);
   const [selection, setSelection]: [{ revision: number; text: string }, React.Dispatch<React.SetStateAction<{ revision: number; text: string }>>] = useState({ revision: 0, text: initialText });
-  const hiddenNames: (text: string) => readonly string[] = useState(() => (text: string): string[] => Array.from(document.current.sources.keys()).filter((name: string): boolean => !document.current.shown.includes(name) && !canCompletePartial(document.current.sources.get(name) ?? '', name, text)))[0];
+  const hiddenNames: (text: string) => readonly string[] = useState(() => (text: string) => Array.from(document.current.sources.keys()).filter((name: string) => !document.current.shown.includes(name) && !canCompletePartial(document.current.sources.get(name) ?? '', name, text)))[0];
   const change: (value: string) => void = useState(() => function update(value: string): void {
     const command: RegExpMatchArray | string[] = value.match(/^([A-Za-z_][A-Za-z0-9_]*)@[ \t]*$/m) ?? [];
     const requested: string = command.at(1) ?? '';
@@ -357,7 +357,7 @@ function Workspace({ initialText, initial, knownClasses }: {
       const expanded: string = value.replace(/^([A-Za-z_][A-Za-z0-9_]*)@[ \t]*$/m, stored);
       document.current.shown = [...document.current.shown, requested];
       update(expanded);
-      setSelection((previous: { revision: number; text: string }): { revision: number; text: string } => ({ revision: previous.revision + 1, text: expanded }));
+      setSelection((previous: { revision: number; text: string }) => ({ revision: previous.revision + 1, text: expanded }));
       return;
     }
     if (!value.trim()) { document.current.validity = 'valid'; document.current.shown = []; setVisible([]); setMessage('Diagram is up to date'); return; }
@@ -367,7 +367,7 @@ function Workspace({ initialText, initial, knownClasses }: {
       if (result.diagram) {
         const projected: string[] = [];
         let inserted: boolean = false;
-        document.current.sources.forEach((source: string, name: string): void => {
+        document.current.sources.forEach((source: string, name: string) => {
           if (!document.current.shown.includes(name)) projected.push(source);
           else if (!inserted) { projected.push(value); inserted = true; }
         });
@@ -379,12 +379,12 @@ function Workspace({ initialText, initial, knownClasses }: {
       return;
     }
     const blocks: string[] = classBlocks(value);
-    const names: string[] = [result.diagram.title, ...(result.diagram.classes ?? []).map((item: Diagram): string => item.title)];
+    const names: string[] = [result.diagram.title, ...(result.diagram.classes ?? []).map((item: Diagram) => item.title)];
     const old: DocumentState = document.current;
-    if (names.some((name: string): boolean => old.sources.has(name) && !old.shown.includes(name) && !canCompletePartial(old.sources.get(name) ?? '', name, value))) { document.current.validity = 'invalid'; setMessage('A hidden class already has that name. Showing the last valid diagram.'); return; }
+    if (names.some((name: string) => old.sources.has(name) && !old.shown.includes(name) && !canCompletePartial(old.sources.get(name) ?? '', name, value))) { document.current.validity = 'invalid'; setMessage('A hidden class already has that name. Showing the last valid diagram.'); return; }
     const updated: Map<string, string> = new Map<string, string>();
     let next: number = 0;
-    old.sources.forEach((source: string, name: string): void => {
+    old.sources.forEach((source: string, name: string) => {
       if (!old.shown.includes(name)) { updated.set(name, source); return; }
       const newName: string = names.at(next) ?? '';
       const block: string = blocks.at(next) ?? '';
@@ -400,13 +400,13 @@ function Workspace({ initialText, initial, knownClasses }: {
   function select(name: string, exclusive: boolean): void {
     if (document.current.validity === 'invalid') { setMessage('Correct the current text before changing the visible classes.'); return; }
     let source: string = document.current.sources.get(name) ?? '';
-    if (!source) { const known: ClassDetails | undefined = knownClasses.find((item: ClassDetails): boolean => item.name === name); source = known ? classDetailsToText(known) : name; document.current.sources.set(name, source); }
-    const shown: string[] = exclusive ? [name] : document.current.shown.includes(name) ? document.current.shown.filter((item: string): boolean => item !== name) : [...document.current.shown, name];
+    if (!source) { const known: ClassDetails | undefined = knownClasses.find((item: ClassDetails) => item.name === name); source = known ? classDetailsToText(known) : name; document.current.sources.set(name, source); }
+    const shown: string[] = exclusive ? [name] : document.current.shown.includes(name) ? document.current.shown.filter((item: string) => item !== name) : [...document.current.shown, name];
     document.current.shown = shown;
     setVisible(shown);
-    setSelection((previous: { revision: number; text: string }): { revision: number; text: string } => ({
+    setSelection((previous: { revision: number; text: string }) => ({
       revision: previous.revision + 1,
-      text: shown.map((item: string): string => document.current.sources.get(item) ?? '').join('\n\n') }));
+      text: shown.map((item: string) => document.current.sources.get(item) ?? '').join('\n\n') }));
   }
   return <main><header className="topbar"><div className="brand"><span className="mark">◇</span><strong>cod<span>AI</span>gram</strong></div><div className="subtitle">Think in text. See the structure.</div><div className="badge">EARLY PREVIEW</div></header><section className="workspace"><section className="pane text-pane"><div className="pane-heading"><div><span className="eyebrow">SOURCE</span><h1>Text editor</h1></div><span className="file-badge">CLASS DIAGRAM</span></div><p className="hint">Describe your diagram here. Your canvas updates as you type.</p><Editor initialText={initialText} onChange={change} selection={selection} hiddenNames={hiddenNames} /><div className="status" aria-live="polite"><span className="dot" />{message}</div></section><section className="pane graph-pane"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Diagram canvas</h2></div><span className="file-badge">LIVE VIEW</span></div><p className="hint">A visual projection of your text.</p><Canvas diagram={diagram} knownClasses={knownClasses} partialRetention={partialRetention} visible={visible} onSelect={select} /></section></section></main>;
 }
@@ -420,9 +420,9 @@ function App() {
   const [state, setState]: [LoadStateT, React.Dispatch<React.SetStateAction<LoadStateT>>] = useState<LoadStateT>({ status: 'loading' });
   useEffect(() => {
     const controller: AbortController = new AbortController();
-    loadClassDetails(controller.signal).then((details: ClassDetails[]): void => {
+    loadClassDetails(controller.signal).then((details: ClassDetails[]) => {
       // UNTRUST-ALLOW-NULLISH: A server response can omit the requested class and Array.find returns undefined in that case; the guard produces a visible loading error.
-      const found: ClassDetails | undefined = details.find((item: ClassDetails): boolean => item.name === 'ClassDiagram');
+      const found: ClassDetails | undefined = details.find((item: ClassDetails) => item.name === 'ClassDiagram');
       if (!found) { setState({ status: 'error' }); return; }
       const text: string = classDetailsToText(found);
       const parsed: ParseResultT = parseDiagram(text);
@@ -430,8 +430,8 @@ function App() {
         status: 'ready',
         text,
         diagram: parsed.diagram,
-        classes: details.filter((item: ClassDetails): boolean => item.name !== found.name) } : { status: 'error' });
-    }).catch((): void => { if (!controller.signal.aborted) setState({ status: 'error' }); });
+        classes: details.filter((item: ClassDetails) => item.name !== found.name) } : { status: 'error' });
+    }).catch(() => { if (!controller.signal.aborted) setState({ status: 'error' }); });
     return () => controller.abort();
   }, []);
   if (state.status === 'loading') return <main role="status">Loading class details…</main>;

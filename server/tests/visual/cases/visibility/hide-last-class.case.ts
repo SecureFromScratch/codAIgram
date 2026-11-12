@@ -14,12 +14,12 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerHideLastClassCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await page.locator(".joint-type-standard-headeredrectangle").click();
     await page.waitForFunction(
-      (): boolean => document.querySelectorAll("[data-eye-badge]").length === 0,
+      () => document.querySelectorAll("[data-eye-badge]").length === 0,
     );
     assert.equal(
       (await editor.locator(".cm-line").allTextContents()).join("\n"),
@@ -31,9 +31,9 @@ export function registerHideLastClassCase(): void {
     );
     await page.locator(".joint-type-standard-headeredrectangle").click();
     await page.waitForFunction(
-      (expected: string): boolean =>
+      (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === expected,
       text,
     );

@@ -14,14 +14,14 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerEyeBadgeCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
     const badges: import("playwright").Locator =
       page.locator("[data-eye-badge]");
     await page.waitForFunction(
-      (): boolean => document.querySelectorAll("[data-eye-badge]").length === 2,
+      () => document.querySelectorAll("[data-eye-badge]").length === 2,
     );
     {
       const __badgeValues: readonly import("playwright").Locator[] =
@@ -45,16 +45,7 @@ export function registerEyeBadgeCase(): void {
         } = await badge.evaluate(
           (
             element: Element,
-          ): {
-            readonly text: string | null;
-            readonly circle: string | null;
-            readonly width: number;
-            readonly height: number;
-            readonly left: number;
-            readonly top: number;
-            readonly boxLeft: number | undefined;
-            readonly boxTop: number | undefined;
-          } => {
+          ) => {
             const circle: SVGCircleElement | null =
               element.querySelector("circle");
             const box: SVGRectElement | null | undefined = element

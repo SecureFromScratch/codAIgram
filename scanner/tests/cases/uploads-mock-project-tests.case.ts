@@ -54,11 +54,11 @@ export function registerUploadsMockProjectTestsCase(): void {
       assert.equal(response.status, 200);
       const actualTests: readonly ExpectedTestT[] = await response.json() as readonly ExpectedTestT[];
       assert.deepEqual(actualTests, EXPECTED_TESTS);
-      const uniqueKeys: Set<string> = new Set<string>(actualTests.map((item: ExpectedTestT): string => `${item.group}.${item.name}`));
+      const uniqueKeys: Set<string> = new Set<string>(actualTests.map((item: ExpectedTestT) => `${item.group}.${item.name}`));
       assert.equal(actualTests.length, EXPECTED_TESTS.length);
       assert.equal(uniqueKeys.size, actualTests.length);
     } finally {
-      await new Promise<void>((resolve, reject) => server.close((error?: Error): void => error === undefined ? resolve() : reject(error)));
+      await new Promise<void>((resolve, reject) => server.close((error?: Error) => error === undefined ? resolve() : reject(error)));
     }
   });
 }

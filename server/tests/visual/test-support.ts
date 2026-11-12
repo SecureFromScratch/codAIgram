@@ -9,9 +9,9 @@ let server: ViteDevServer | undefined;
 let api: ReturnType<ReturnType<typeof createApp>["listen"]> | undefined;
 export let page: Page;
 export function registerVisualLifecycle(): void {
-  before(async (): Promise<void> => {
+  before(async () => {
     api = createApp(new MemoryClassRepository()).listen(0, "127.0.0.1");
-    await new Promise<void>((resolve): void => api?.once("listening", resolve));
+    await new Promise<void>((resolve) => api?.once("listening", resolve));
     const apiAddress: ReturnType<NonNullable<typeof api>["address"]> =
       api.address();
     assert.ok(apiAddress !== null && typeof apiAddress !== "string");
@@ -35,16 +35,16 @@ export function registerVisualLifecycle(): void {
     await page.goto(`http://127.0.0.1:${String(address.port)}/`);
     await page.locator(".canvas svg").first().waitFor({ timeout: 10000 });
   });
-  beforeEach(async (): Promise<void> => {
+  beforeEach(async () => {
     await page.reload();
     await page.locator(".canvas svg").first().waitFor({ timeout: 10000 });
   });
-  after(async (): Promise<void> => {
+  after(async () => {
     if (browser !== undefined) await browser.close();
     if (server !== undefined) await server.close();
     if (api !== undefined)
-      await new Promise<void>((resolve, reject): void =>
-        api?.close((error?: Error): void =>
+      await new Promise<void>((resolve, reject) =>
+        api?.close((error?: Error) =>
           error === undefined ? resolve() : reject(error),
         ),
       );

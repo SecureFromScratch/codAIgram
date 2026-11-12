@@ -17,14 +17,14 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMissingOwnedTypeCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(text.replace("OWNS classes: Class[]", "OWNS classes:"));
-    await page.waitForFunction((): boolean =>
+    await page.waitForFunction(() =>
       [
         ...document.querySelectorAll(".joint-type-standard-rectangle text"),
-      ].some((item: Element): boolean => item.textContent === "?"),
+      ].some((item: Element) => item.textContent === "?"),
     );
     const targets: string[] = await page
       .locator(".joint-type-standard-rectangle text")

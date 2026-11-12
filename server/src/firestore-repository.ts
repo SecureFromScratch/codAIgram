@@ -17,7 +17,7 @@ function isRelation(value: unknown): value is ClassDetails['relations'][number] 
 
 function isClassDetails(value: unknown): value is ClassDetails {
   // UNTRUST-ALLOW-NULLISH: Firestore documents are untrusted persisted data; exclude null before inspecting any properties and returning a domain DTO.
-  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every((item: unknown): boolean => typeof item === 'string') && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isRelation);
+  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every((item: unknown) => typeof item === 'string') && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isRelation);
 }
 
 export class FirestoreClassRepository implements ClassRepository {
@@ -27,7 +27,7 @@ export class FirestoreClassRepository implements ClassRepository {
   async getDetails(names: readonly string[]): Promise<ClassDetails[]> {
     const snapshots: DocumentSnapshot[] = await Promise.all(names.map((name: string) => this.#database.collection(this.#collection).doc(name).get()));
     const result: ClassDetails[] = [];
-    snapshots.forEach((snapshot, index: number): void => {
+    snapshots.forEach((snapshot, index: number) => {
       if (!snapshot.exists) return;
       const data: unknown = snapshot.data();
       if (!isClassDetails(data) || data.name !== names.at(index)) throw new Error('Stored class details are invalid.');
@@ -37,7 +37,7 @@ export class FirestoreClassRepository implements ClassRepository {
   }
   async updateClasses(classes: readonly ClassDetails[]): Promise<void> {
     const batch: ReturnType<Firestore['batch']> = this.#database.batch();
-    classes.forEach((item: ClassDetails): void => { batch.set(this.#database.collection(this.#collection).doc(item.name), item); });
+    classes.forEach((item: ClassDetails) => { batch.set(this.#database.collection(this.#collection).doc(item.name), item); });
     await batch.commit();
   }
 }

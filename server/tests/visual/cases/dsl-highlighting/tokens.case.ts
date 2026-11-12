@@ -13,7 +13,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerDslTokensCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const editor: import("playwright").Locator = page.getByRole("textbox", { name: "Diagram text", });
     const heading: import("playwright").Locator =
       editor.locator(".dsl-class-name");
@@ -25,11 +25,7 @@ export function registerDslTokensCase(): void {
     } = await heading.evaluate(
       (
         element: HTMLElement,
-      ): {
-        readonly weight: string;
-        readonly style: string;
-        readonly decoration: string;
-      } => ({
+      ) => ({
         weight: getComputedStyle(element).fontWeight,
         style: getComputedStyle(element).fontStyle,
         decoration: getComputedStyle(element).textDecorationLine,
@@ -60,12 +56,7 @@ export function registerDslTokensCase(): void {
     } = await owns.evaluate(
       (
         element: HTMLElement,
-      ): {
-        readonly style: string;
-        readonly weight: string;
-        readonly decoration: string;
-        readonly color: string;
-      } => ({
+      ) => ({
         style: getComputedStyle(element).fontStyle,
         weight: getComputedStyle(element).fontWeight,
         decoration: getComputedStyle(element).textDecorationLine,
@@ -81,7 +72,7 @@ export function registerDslTokensCase(): void {
         .locator(".dsl-parameter")
         .first()
         .evaluate(
-          (element: HTMLElement): string => getComputedStyle(element).fontStyle,
+          (element: HTMLElement) => getComputedStyle(element).fontStyle,
         ),
       "italic",
     );
@@ -90,7 +81,7 @@ export function registerDslTokensCase(): void {
         .locator(".dsl-type-keyword")
         .first()
         .evaluate(
-          (element: HTMLElement): string => getComputedStyle(element).fontStyle,
+          (element: HTMLElement) => getComputedStyle(element).fontStyle,
         ),
       "normal",
     );
@@ -99,7 +90,7 @@ export function registerDslTokensCase(): void {
         .locator(".dsl-type")
         .last()
         .evaluate(
-          (element: HTMLElement): string => getComputedStyle(element).fontStyle,
+          (element: HTMLElement) => getComputedStyle(element).fontStyle,
         ),
       "normal",
     );

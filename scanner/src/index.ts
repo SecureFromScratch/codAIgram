@@ -56,14 +56,14 @@ function findFiles(rootPath: string): readonly string[] {
   while (pendingDirectories.length > 0) {
     const directory: string | undefined = pendingDirectories.pop();
     if (directory === undefined) continue;
-    const entries: readonly fs.Dirent[] = fs.readdirSync(directory, { withFileTypes: true }).sort((left: fs.Dirent, right: fs.Dirent): number => left.name.localeCompare(right.name));
+    const entries: readonly fs.Dirent[] = fs.readdirSync(directory, { withFileTypes: true }).sort((left: fs.Dirent, right: fs.Dirent) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const entryPath: string = path.join(directory, entry.name);
       if (entry.isDirectory() && !IGNORED_DIRECTORY_NAMES.has(entry.name)) pendingDirectories.push(entryPath);
       if (entry.isFile()) files.push(entryPath);
     }
   }
-  return files.sort((left: string, right: string): number => left.localeCompare(right));
+  return files.sort((left: string, right: string) => left.localeCompare(right));
 }
 
 function nameWithoutSuffix(filePath: string, suffixPattern: RegExp): string {
@@ -119,8 +119,8 @@ function readCaseMetadata(casePath: string): TestCaseT {
 
 function scanTests(rootPath: string): ScanResultT {
   const files: readonly string[] = findFiles(rootPath);
-  const groupFiles: readonly string[] = files.filter((filePath: string): boolean => GROUP_FILE_PATTERN.test(filePath));
-  const caseFiles: readonly string[] = files.filter((filePath: string): boolean => CASE_FILE_PATTERN.test(filePath));
+  const groupFiles: readonly string[] = files.filter((filePath: string) => GROUP_FILE_PATTERN.test(filePath));
+  const caseFiles: readonly string[] = files.filter((filePath: string) => CASE_FILE_PATTERN.test(filePath));
   const groupNamesByDirectory: Map<string, string> = new Map<string, string>();
   const groups: string[] = [];
   for (const groupFile of groupFiles) {
@@ -135,7 +135,7 @@ function scanTests(rootPath: string): ScanResultT {
     const metadata: TestCaseT = readCaseMetadata(caseFile);
     cases.push({ group: groupName, name: caseName, description: metadata.description, prompt: metadata.prompt });
   }
-  return { groups: groups.sort((left: string, right: string): number => left.localeCompare(right)), cases: cases.sort((left: TestCaseT, right: TestCaseT): number => `${left.group}.${left.name}`.localeCompare(`${right.group}.${right.name}`)) };
+  return { groups: groups.sort((left: string, right: string) => left.localeCompare(right)), cases: cases.sort((left: TestCaseT, right: TestCaseT) => `${left.group}.${left.name}`.localeCompare(`${right.group}.${right.name}`)) };
 }
 
 async function run(): Promise<void> {
@@ -157,7 +157,7 @@ async function run(): Promise<void> {
   if (!response.ok) throw new Error(`Test upload failed with HTTP ${String(response.status)}.`);
 }
 
-void run().catch((error: unknown): void => {
+void run().catch((error: unknown) => {
   const message: string = error instanceof Error ? error.message : 'Scanner failed.';
   console.error(message);
   process.exitCode = 2;

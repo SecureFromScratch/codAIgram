@@ -14,7 +14,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerRestoreExistingClassCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     const existing: "ExistingClass\n  field: string\n  run(value: number)" =
@@ -22,9 +22,9 @@ export function registerRestoreExistingClassCase(): void {
     await editor.fill(`${text}\n\n${existing}`);
     await page.locator('[data-class-name="ClassDiagram"]').dblclick();
     await page.waitForFunction(
-      (expected: string): boolean =>
+      (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === expected,
       text,
     );
@@ -36,7 +36,7 @@ export function registerRestoreExistingClassCase(): void {
     const style: { readonly style: string; readonly color: string; } = await conflict.first().evaluate(
       (
         element: HTMLElement,
-      ): { readonly style: string; readonly color: string; } => ({
+      ) => ({
         style: getComputedStyle(element).textDecorationStyle,
         color: getComputedStyle(element).textDecorationColor,
       }),
@@ -46,9 +46,9 @@ export function registerRestoreExistingClassCase(): void {
     await editor.press("End");
     await page.keyboard.type("@");
     await page.waitForFunction(
-      (expected: string): boolean =>
+      (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]
-          .map((line: Element): string | null => line.textContent)
+          .map((line: Element) => line.textContent)
           .join("\n") === expected,
       `${text}\n\n${existing}`,
     );
@@ -61,7 +61,7 @@ export function registerRestoreExistingClassCase(): void {
       `${text}\n\n${existing.replace("run(value: number)", "execute(value: number)")}`,
     );
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector('[data-class-name="ExistingClass"]')
           ?.textContent?.includes("execute") === true,

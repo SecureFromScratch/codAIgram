@@ -4,7 +4,7 @@ import { registerInvalidInputCase } from "./cases/invalid-input.case.js";
 import { registerInvalidUpdateCase } from "./cases/invalid-update.case.js";
 import { registerOversizeUpdateCase } from "./cases/oversize-update.case.js";
 import { registerUpdateClassesCase } from "./cases/update-classes.case.js";
-describe("class details API", (): void => {
+describe("class details API", () => {
   registerClassDetailsCase();
   registerUpdateClassesCase();
   registerInvalidUpdateCase();

@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerHeadingAreaCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const data: {
       headerValue: string;
       names: (string | null)[];
@@ -39,7 +39,7 @@ export function registerHeadingAreaCase(): void {
       const names: (string | null)[] = [
         ...document.querySelectorAll("svg text"),
       ]
-        .filter((element): boolean => {
+        .filter((element) => {
           const bounds: DOMRect = element.getBoundingClientRect();
           return (
             bounds.top < headerBounds.bottom &&
@@ -48,7 +48,7 @@ export function registerHeadingAreaCase(): void {
             bounds.right > headerBounds.left
           );
         })
-        .map((element): string | null => element.textContent);
+        .map((element) => element.textContent);
       return {
         headerValue: text.textContent,
         names,

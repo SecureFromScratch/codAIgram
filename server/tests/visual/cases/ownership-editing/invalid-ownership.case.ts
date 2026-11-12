@@ -17,7 +17,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerInvalidOwnershipCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     {
@@ -33,7 +33,7 @@ export function registerInvalidOwnershipCase(): void {
         const invalid: string = __invalidValues[__invalidIndex]!;
         await editor.fill(text.replace("OWNS classes: Class[]", invalid));
         await page.waitForFunction(
-          (): boolean => document.querySelectorAll(".joint-link").length === 0,
+          () => document.querySelectorAll(".joint-link").length === 0,
         );
         const error: import("playwright").Locator =
           editor.locator(".dsl-error");
@@ -48,11 +48,7 @@ export function registerInvalidOwnershipCase(): void {
         } = await error.first().evaluate(
           (
             element: HTMLElement,
-          ): {
-            readonly line: string;
-            readonly style: string;
-            readonly color: string;
-          } => ({
+          ) => ({
             line: getComputedStyle(element).textDecorationLine,
             style: getComputedStyle(element).textDecorationStyle,
             color: getComputedStyle(element).textDecorationColor,

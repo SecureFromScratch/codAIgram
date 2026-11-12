@@ -33,7 +33,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 async function inspectDiagramText(): Promise<DiagramTextT> {
-  return page.evaluate((): DiagramTextT => {
+  return page.evaluate(() => {
     const source: Element | null = document.querySelector(
       ".joint-type-standard-headeredrectangle",
     );
@@ -58,7 +58,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
     )
       throw new Error("Diagram text or bounds are missing.");
     const rows: TextRowT[] = [...body.querySelectorAll(":scope > tspan")].map(
-      (row: Element): TextRowT => ({
+      (row: Element) => ({
         text: row.textContent,
         rect: row.getBoundingClientRect(),
       }),
@@ -73,7 +73,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
       targetRect: targetText.getBoundingClientRect(),
       targetBoxRect: targetBox.getBoundingClientRect(),
       marker: [...document.querySelectorAll(".joint-link text")].map(
-        (text: Element): string | null => text.textContent,
+        (text: Element) => text.textContent,
       ),
     };
   });
@@ -139,7 +139,7 @@ async function verifyText(
   assert.deepEqual(actual.marker, ["classes", "*"]);
 }
 export function registerTextEllipsisCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     await verifyText(
       "ClassDiagram",
       ["addClass", "addPartialClass", "connectClasses", "recalcLayout"],
@@ -155,7 +155,7 @@ export function registerTextEllipsisCase(): void {
       .getByRole("textbox", { name: "Diagram text" })
       .fill(`${heading}\n  ${member}\nOWNS classes: ${target}[]`);
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document
           .querySelector(".joint-type-standard-headeredrectangle text")
           ?.textContent?.startsWith("VeryWide") === true,

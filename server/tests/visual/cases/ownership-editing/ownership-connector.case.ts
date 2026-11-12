@@ -12,7 +12,7 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerOwnershipConnectorCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const data: {
       headerHeight: number;
       partialHeight: number;
@@ -44,7 +44,7 @@ export function registerOwnershipConnectorCase(): void {
         partialFill: partial.getAttribute("fill"),
         marker: marker?.innerHTML ?? "",
         labels: [...document.querySelectorAll(".joint-link text")].map(
-          (text): string | null => text.textContent,
+          (text) => text.textContent,
         ),
       };
     });

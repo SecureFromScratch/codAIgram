@@ -102,7 +102,7 @@ export async function verifySecondaryClassPropertyEdits(
       : "modifications : Modification[]";
   await editor.fill(selected.source.replace(property, "updated: boolean"));
   await page.waitForFunction(
-    (name: string): boolean =>
+    (name: string) =>
       document
         .querySelector(`[data-class-name="${name}"]`)
         ?.textContent?.includes("updated: boolean") === true,
@@ -135,7 +135,7 @@ export async function verifySecondaryClassMethodEdits(
     `[data-class-name="${fixture.name}"]`,
   );
   await page.waitForFunction(
-    (name: string): boolean =>
+    (name: string) =>
       document
         .querySelector(`[data-class-name="${name}"]`)
         ?.textContent?.includes("inspect") === true,
@@ -179,7 +179,7 @@ export async function verifySecondaryClassMethodEdits(
   await page.keyboard.press("Shift+End");
   await page.keyboard.press("Backspace");
   await page.waitForFunction(
-    (name: string): boolean =>
+    (name: string) =>
       document
         .querySelector(`[data-class-name="${name}"]`)
         ?.textContent?.includes("review") !== true,
@@ -187,9 +187,9 @@ export async function verifySecondaryClassMethodEdits(
   );
   await page.keyboard.press("Control+z");
   await page.waitForFunction(
-    (expected: string): boolean =>
+    (expected: string) =>
       [...document.querySelectorAll(".cm-content .cm-line")]
-        .map((item: Element): string | null => item.textContent)
+        .map((item: Element) => item.textContent)
         .join("\n") === expected,
     current,
   );
@@ -205,27 +205,27 @@ export async function verifySecondaryClassOwnershipEdits(
     await isolateSecondaryClass(fixture.name);
   const relationship: string = `${selected.source}\nOWNS entries: Entry[]`;
   await editor.fill(relationship);
-  await page.waitForFunction((): boolean =>
+  await page.waitForFunction(() =>
     [...document.querySelectorAll(".joint-link text")].some(
-      (item: Element): boolean => item.textContent === "entries",
+      (item: Element) => item.textContent === "entries",
     ),
   );
   assert.equal(await page.locator('[data-class-name="Entry"]').count(), 1);
   assert.equal(await page.locator(".joint-link").count(), 2);
   await editor.fill(relationship.replace("Entry[]", "Entry"));
-  await page.waitForFunction((): boolean =>
+  await page.waitForFunction(() =>
     [...document.querySelectorAll(".joint-link")].some(
-      (link: Element): boolean =>
+      (link: Element) =>
         [...link.querySelectorAll("text")]
-          .map((item: Element): string | null => item.textContent)
+          .map((item: Element) => item.textContent)
           .join("|") === "entries",
     ),
   );
   await editor.fill(relationship.replace("entries: Entry[]", "Entry[]"));
   await page.waitForFunction(
-    (): boolean =>
+    () =>
       ![...document.querySelectorAll(".joint-link text")].some(
-        (item: Element): boolean => item.textContent === "entries",
+        (item: Element) => item.textContent === "entries",
       ),
   );
   assert.equal(await page.locator(".joint-link").count(), 2);
@@ -233,26 +233,26 @@ export async function verifySecondaryClassOwnershipEdits(
     relationship.replace("OWNS entries: Entry[]", "OWX entries: Entry[]"),
   );
   await page.waitForFunction(
-    (): boolean => document.querySelectorAll(".joint-link").length === 1,
+    () => document.querySelectorAll(".joint-link").length === 1,
   );
   await assertRedWavyError(editor, "entries: Entry[]");
   await editor.fill(relationship);
   await page.waitForFunction(
-    (): boolean => document.querySelectorAll(".joint-link").length === 2,
+    () => document.querySelectorAll(".joint-link").length === 2,
   );
   await editor.fill(relationship.replace("Entry[]", ""));
-  await page.waitForFunction((): boolean =>
+  await page.waitForFunction(() =>
     [...document.querySelectorAll(".joint-type-standard-rectangle text")].some(
-      (item: Element): boolean => item.textContent === "?",
+      (item: Element) => item.textContent === "?",
     ),
   );
   await editor.fill(relationship);
   await page.waitForFunction(
-    (): boolean => document.querySelectorAll(".joint-link").length === 2,
+    () => document.querySelectorAll(".joint-link").length === 2,
   );
   await editor.fill(selected.source);
   await page.waitForFunction(
-    (): boolean => document.querySelectorAll(".joint-link").length === 1,
+    () => document.querySelectorAll(".joint-link").length === 1,
   );
   assert.equal(await page.locator('[data-class-name="Entry"]').count(), 0);
 }
@@ -282,7 +282,7 @@ export async function verifySecondaryClassTooltipEdges(
           (
             canvas: Element,
             input: { readonly name: string; readonly side: "top" | "bottom"; },
-          ): void => {
+          ) => {
             const rectangle: Element | null = canvas.querySelector(
               `[data-class-name="${input.name}"] rect`,
             );
@@ -305,7 +305,7 @@ export async function verifySecondaryClassTooltipEdges(
         const tooltip: import("playwright").Locator = page.getByRole("tooltip");
         await tooltip.waitFor();
         const fits: boolean = await tooltip.evaluate(
-          (element: HTMLElement): boolean => {
+          (element: HTMLElement) => {
             const panel: Element | null = element.closest(".graph-pane");
             if (panel === null) throw new Error("Expected graph pane.");
             const tip: DOMRect = element.getBoundingClientRect();
@@ -330,7 +330,7 @@ export async function verifySecondaryClassTooltipEdges(
     }
   } finally {
     await page.setViewportSize({ width: 1600, height: 1000 });
-    await page.locator(".canvas").evaluate((element: Element): void => {
+    await page.locator(".canvas").evaluate((element: Element) => {
       element.scrollTop = 0;
     });
   }

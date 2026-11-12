@@ -38,7 +38,7 @@ function decorations(state: EditorState): DecorationSet {
     const isOwnership: boolean = /^\s*OWNS\b/.test(text);
     const startsMethod: boolean = parentheses === 0 && /^ {2}\S/.test(text) && !isOwnership;
     const tokens: RegExpMatchArray[] = Array.from(text.matchAll(/[A-Za-z_][A-Za-z0-9_]*|[()[\]<>:,]/g));
-    tokens.forEach((token: RegExpMatchArray, index: number): void => {
+    tokens.forEach((token: RegExpMatchArray, index: number) => {
       const value: string = token.at(0) ?? '';
       const position: number = token.index ?? 0;
       let mark: Decoration = PUNCTUATION;
@@ -63,8 +63,8 @@ function decorations(state: EditorState): DecorationSet {
 }
 
 export const dslHighlighting: StateField<DecorationSet> = StateField.define<DecorationSet>({
-  create: (state: EditorState): DecorationSet => decorations(state),
-  update: (previous: DecorationSet, transaction: Transaction): DecorationSet => transaction.docChanged ? decorations(transaction.state) : previous,
+  create: (state: EditorState) => decorations(state),
+  update: (previous: DecorationSet, transaction: Transaction) => transaction.docChanged ? decorations(transaction.state) : previous,
   provide: (field: StateField<DecorationSet>) => EditorView.decorations.from(field)
 });
 
@@ -138,13 +138,13 @@ function errors(state: EditorState, hiddenNames: readonly string[]): DecorationS
 
 export function dslErrorsFor(hiddenNames: (text: string) => readonly string[]): StateField<DecorationSet> {
   return StateField.define<DecorationSet>({
-    create: (state: EditorState): DecorationSet => errors(state, hiddenNames(state.doc.toString())),
-    update: (previous: DecorationSet, transaction: Transaction): DecorationSet => transaction.docChanged ? errors(transaction.state, hiddenNames(transaction.state.doc.toString())) : previous,
+    create: (state: EditorState) => errors(state, hiddenNames(state.doc.toString())),
+    update: (previous: DecorationSet, transaction: Transaction) => transaction.docChanged ? errors(transaction.state, hiddenNames(transaction.state.doc.toString())) : previous,
     provide: (field: StateField<DecorationSet>) => EditorView.decorations.from(field)
   });
 }
 
-export const dslErrorTooltip: ReturnType<typeof hoverTooltip> = hoverTooltip((view: EditorView, position: number): Tooltip | readonly Tooltip[] => {
+export const dslErrorTooltip: ReturnType<typeof hoverTooltip> = hoverTooltip((view: EditorView, position: number) => {
   const line: ReturnType<EditorState['doc']['lineAt']> = view.state.doc.lineAt(position);
   const location: { node: Node; offset: number } = view.domAtPos(position);
   // UNTRUST-ALLOW-NULLISH: Browser DOM nodes may be detached and parentElement returns null; convert that boundary to an absent value before checking for a diagnostic.
@@ -157,5 +157,5 @@ export const dslErrorTooltip: ReturnType<typeof hoverTooltip> = hoverTooltip((vi
     pos: line.from,
     end: line.to,
     above: true,
-    create: (): { dom: HTMLElement } => { const dom: HTMLElement = document.createElement('div'); dom.className = 'dsl-diagnostic-tooltip'; dom.textContent = message; return { dom }; } };
+    create: () => { const dom: HTMLElement = document.createElement('div'); dom.className = 'dsl-diagnostic-tooltip'; dom.textContent = message; return { dom }; } };
 });

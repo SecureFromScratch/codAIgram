@@ -14,20 +14,20 @@ export const TEST_CASE_METADATA: {
   },
 };
 export function registerMultipleClassesCase(): void {
-  test(TEST_CASE_METADATA.title, async (): Promise<void> => {
+  test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     const extra: "\n\nClass\n  isPartial : bool\n  modifications: ModificationRecord[]\n  addModification(ModificationRecord)\n\nModificationRecord\n  by: [AI, Human, Scan]\n  at: datetime" =
       "\n\nClass\n  isPartial : bool\n  modifications: ModificationRecord[]\n  addModification(ModificationRecord)\n\nModificationRecord\n  by: [AI, Human, Scan]\n  at: datetime";
     const source: string = text + extra;
     await editor.fill(source);
-    await page.waitForFunction((): boolean =>
+    await page.waitForFunction(() =>
       [
         ...document.querySelectorAll(
           ".joint-type-standard-headeredrectangle text:first-of-type",
         ),
       ].some(
-        (element: Element): boolean =>
+        (element: Element) =>
           element.textContent === "ModificationRecord",
       ),
     );
@@ -37,30 +37,30 @@ export function registerMultipleClassesCase(): void {
       .filter({ hasText: "isPartial" });
     assert.ok(((await classBox.textContent()) ?? "").includes("modifications"));
     await editor.fill(source.replace("isPartial : bool", "isComplete : bool"));
-    await page.waitForFunction((): boolean =>
+    await page.waitForFunction(() =>
       [
         ...document.querySelectorAll(".joint-type-standard-headeredrectangle"),
-      ].some((item: Element): boolean =>
+      ].some((item: Element) =>
         (item.textContent ?? "").includes("isComplete : bool"),
       ),
     );
     await editor.fill(source);
     await editor.fill(source.replace("\n\nClass\n", "\n\nClass1\n"));
-    await page.waitForFunction((): boolean =>
+    await page.waitForFunction(() =>
       [
         ...document.querySelectorAll(".joint-type-standard-rectangle text"),
-      ].some((item: Element): boolean => item.textContent === "Class"),
+      ].some((item: Element) => item.textContent === "Class"),
     );
     assert.ok(
       (
         await page
           .locator(".joint-type-standard-headeredrectangle")
           .allTextContents()
-      ).some((item: string): boolean => item.includes("Class1")),
+      ).some((item: string) => item.includes("Class1")),
     );
     await editor.fill(source);
     await page.waitForFunction(
-      (): boolean =>
+      () =>
         document.querySelectorAll(".joint-type-standard-rectangle").length ===
         0,
     );
