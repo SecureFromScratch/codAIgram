@@ -47,7 +47,7 @@ export function registerLongLinesAndContinuationsCase(): void {
         ) => {
           const scroller: ReturnType<HTMLElement["closest"]> =
             line.closest<HTMLElement>(".cm-scroller");
-          if (!scroller) throw new Error("Expected editor scroller.");
+          if (!scroller) window.logAndThrow(new Error("Expected editor scroller."));
           return {
             width: line.getBoundingClientRect().width,
             height: line.getBoundingClientRect().height,

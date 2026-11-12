@@ -17,6 +17,13 @@ export function registerSemanticUpdateCase(): void {
       diagram: {
         title: 'Package',
         members: ['ship()'],
-        targets: [{ name: 'items', target: 'Item', multiplicity: 'many' }] } });
+        targets: [{
+          kind: 'OWNS',
+          name: 'items',
+          target: 'Item',
+          multiplicity: 'many'
+        }]
+      }
+    });
   });
 }

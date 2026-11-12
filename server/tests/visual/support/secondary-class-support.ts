@@ -1,5 +1,6 @@
 import type { Locator } from "playwright";
 import { page } from "../test-support.js";
+import { logAndThrow } from "../logging.js";
 import { resetOwnershipEditor } from "./editor-support.js";
 export type SecondaryClassFixtureT = {
   readonly name: string;
@@ -28,7 +29,7 @@ export function getSecondaryClassFixture(name: string): SecondaryClassFixtureT {
     (item: SecondaryClassFixtureT) => item.name === name,
   );
   if (!fixture)
-    throw new Error(`No secondary class fixture named ${name}.`);
+    logAndThrow(new Error(`No secondary class fixture named ${name}.`));
   return fixture;
 }
 export async function isolateSecondaryClass(

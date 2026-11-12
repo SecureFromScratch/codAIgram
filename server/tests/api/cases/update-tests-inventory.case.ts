@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loggedFetch } from "../../../dist/utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -7,13 +8,13 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: { availability: string; text: string; };
 } = {
-  title: "updates and adds test inventory records",
+  title: "updates and adds tests inventory records",
   prompt: {
     availability: "available",
     text: "Replace one test by group and name while adding another.",
   },
 };
-export function registerUpdateInventoryCase(): void {
+export function registerUpdateTestsInventoryCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
       createApp(new MemoryClassRepository()).listen(0, "127.0.0.1");
@@ -62,18 +63,18 @@ export function registerUpdateInventoryCase(): void {
           prompt: "Test inventory upload.",
         },
       ];
-      await fetch(`${baseUrl}/updateTests`, {
+      await loggedFetch(`${baseUrl}/updateTests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(original),
       });
-      const response: Response = await fetch(`${baseUrl}/updateTests`, {
+      const response: Response = await loggedFetch(`${baseUrl}/updateTests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(update),
       });
       assert.equal(response.status, 200);
-      const read: Response = await fetch(`${baseUrl}/getTests`);
+      const read: Response = await loggedFetch(`${baseUrl}/getTests`);
       assert.deepEqual(await read.json(), [update[0], original[1], update[1]]);
     } finally {
       await new Promise<void>((resolve, reject) =>

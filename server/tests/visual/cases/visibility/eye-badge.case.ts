@@ -34,8 +34,8 @@ export function registerEyeBadgeCase(): void {
         const badge: import("playwright").Locator =
           __badgeValues[__badgeIndex]!;
         const info: {
-          readonly text: string | null;
-          readonly circle: string | null;
+          readonly text: Node["textContent"];
+          readonly circle: string;
           readonly width: number;
           readonly height: number;
           readonly left: number;
@@ -46,16 +46,16 @@ export function registerEyeBadgeCase(): void {
           (
             element: Element,
           ) => {
-            const circle: SVGCircleElement | null =
+            const circle: ReturnType<Element["querySelector"]> =
               element.querySelector("circle");
-            const box: SVGRectElement | null | undefined = element
+            const box: ReturnType<Element["querySelector"]> | undefined = element
               .closest(".joint-element")
               ?.querySelector("rect");
             const bounds: DOMRect = element.getBoundingClientRect();
             const boxBounds: DOMRect | undefined = box?.getBoundingClientRect();
             return {
               text: element.textContent,
-              circle: circle === null ? null : getComputedStyle(circle).fill,
+              circle: circle ? getComputedStyle(circle).fill : "",
               width: bounds.width,
               height: bounds.height,
               left: bounds.left,
@@ -66,13 +66,13 @@ export function registerEyeBadgeCase(): void {
           },
         );
         assert.ok(info.text?.includes("\u{1F441}") === true);
-        assert.ok(info.circle !== null && info.circle !== "none");
+        assert.ok(info.circle && info.circle !== "none");
         assert.ok(
           Math.abs(info.width - info.height) <= 2 && info.width <= 32,
           "badge is a small circle",
         );
         assert.ok(
-          info.boxLeft !== undefined && info.boxTop !== undefined,
+          typeof info.boxLeft === "number" && typeof info.boxTop === "number",
           "badge belongs to a class box",
         );
         assert.ok(

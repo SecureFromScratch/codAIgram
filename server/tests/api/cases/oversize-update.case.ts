@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loggedFetch } from "../../../dist/utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -23,7 +24,7 @@ export function registerOversizeUpdateCase(): void {
       );
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
-      const response: Response = await fetch(
+      const response: Response = await loggedFetch(
         `http://127.0.0.1:${String(address.port)}/api/updateClasses`,
         {
           method: "POST",

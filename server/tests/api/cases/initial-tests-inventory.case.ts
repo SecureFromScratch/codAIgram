@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loggedFetch } from "../../../dist/utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -7,13 +8,13 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: { availability: string; text: string; };
 } = {
-  title: "stores an initial test inventory",
+  title: "stores an initial tests inventory",
   prompt: {
     availability: "available",
     text: "Store two tests and return them unchanged.",
   },
 };
-export function registerInitialInventoryCase(): void {
+export function registerInitialTestsInventoryCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
       createApp(new MemoryClassRepository()).listen(0, "127.0.0.1");
@@ -43,13 +44,13 @@ export function registerInitialInventoryCase(): void {
           prompt: "Test rendering.",
         },
       ];
-      const update: Response = await fetch(`${baseUrl}/updateTests`, {
+      const update: Response = await loggedFetch(`${baseUrl}/updateTests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(tests),
       });
       assert.equal(update.status, 200);
-      const read: Response = await fetch(`${baseUrl}/getTests`);
+      const read: Response = await loggedFetch(`${baseUrl}/getTests`);
       assert.equal(read.status, 200);
       assert.deepEqual(await read.json(), tests);
     } finally {

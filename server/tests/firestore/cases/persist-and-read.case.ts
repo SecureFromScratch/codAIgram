@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loggedFetch } from "../../../dist/utils.js";
 import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -25,7 +26,7 @@ export function registerPersistAndReadCase(): void {
     const collection: string = `codaigram_test_${randomUUID().replaceAll("-", "")}`;
     const added: ClassDetails = {
       name: "IntegrationAdded",
-      methods: ["save(value: string)"],
+      methods: [{ name: "save", overloads: [[{ arg: "value", t: "string" }]] }],
       relations: [],
       isPartial: false,
     };
@@ -40,7 +41,7 @@ export function registerPersistAndReadCase(): void {
         ) {
           const item: (typeof INITIAL_CLASSES)[number] =
             __itemValues[__itemIndex]!;
-          await database.collection(collection).doc(item.name).create(item);
+          await new FirestoreClassRepository(database, collection).updateClasses([item]);
         }
       }
       const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
@@ -57,17 +58,17 @@ export function registerPersistAndReadCase(): void {
         const base: string = `http://127.0.0.1:${String(address.port)}/api`;
         const changed: ClassDetails = {
           name: "Class",
-          methods: ["inspect()"],
+          methods: [{ name: "inspect", overloads: [[]] }],
           relations: [],
           isPartial: false,
         };
-        const update: Response = await fetch(`${base}/updateClasses`, {
+        const update: Response = await loggedFetch(`${base}/updateClasses`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify([added, changed]),
         });
         assert.equal(update.status, 200);
-        const read: Response = await fetch(`${base}/classesDetails`, {
+        const read: Response = await loggedFetch(`${base}/classesDetails`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ classNames: [added.name, changed.name] }),

@@ -17,6 +17,13 @@ export function registerValidMultilineCase(): void {
       diagram: {
         title: 'Diagram',
         members: ['add( first: string, second: integer )'],
-        targets: [{ name: 'items', target: 'Item', multiplicity: 'many' }] } });
+        targets: [{
+          kind: 'OWNS',
+          name: 'items',
+          target: 'Item',
+          multiplicity: 'many'
+        }]
+      }
+    });
   });
 }

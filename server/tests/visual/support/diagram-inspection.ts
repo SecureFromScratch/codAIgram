@@ -26,12 +26,12 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       ".joint-type-standard-rectangle",
     );
     if (!source || !target)
-      throw new Error("Expected both class boxes.");
+      window.logAndThrow(new Error("Expected both class boxes."));
     const rectangles: NodeListOf<SVGRectElement> =
       source.querySelectorAll("rect");
     const text: NodeListOf<SVGTextElement> = source.querySelectorAll("text");
     if (rectangles.length !== 2 || text.length !== 2)
-      throw new Error("Expected a class body, header and two text areas.");
+      window.logAndThrow(new Error("Expected a class body, header and two text areas."));
     const bodyRectangle: SVGRectElement = rectangles.item(0);
     const headerRectangle: SVGRectElement = rectangles.item(1);
     const headerText: SVGTextElement = text.item(0);
@@ -42,7 +42,7 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       !headerText ||
       !bodyText
     )
-      throw new Error("Expected a complete class box.");
+      window.logAndThrow(new Error("Expected a complete class box."));
     const bounds: (element: Element) => BoundsT = (
       element: Element,
     ) => {
@@ -91,7 +91,7 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       .join("");
     const targetRectangle: ReturnType<Element["querySelector"]> = target.querySelector("rect");
     if (!targetRectangle)
-      throw new Error("Expected a target class box.");
+      window.logAndThrow(new Error("Expected a target class box."));
     return {
       header,
       box: bounds(bodyRectangle),

@@ -16,33 +16,32 @@ export function registerOwnershipConnectorCase(): void {
     const data: {
       headerHeight: number;
       partialHeight: number;
-      headerFill: string | null;
-      partialFill: string | null;
+      headerFill: ReturnType<Element["getAttribute"]>;
+      partialFill: ReturnType<Element["getAttribute"]>;
       marker: string;
-      labels: (string | null)[];
+      labels: Node["textContent"][];
     } = await page.evaluate(() => {
-      const header: Element | null = document.querySelector(
+      const header: ReturnType<Document["querySelector"]> = document.querySelector(
         '.joint-type-standard-headeredrectangle rect[joint-selector="header"]',
       );
-      const partial: Element | null = document.querySelector(
+      const partial: ReturnType<Document["querySelector"]> = document.querySelector(
         ".joint-type-standard-rectangle rect",
       );
-      const link: Element | null = document.querySelector(
+      const link: ReturnType<Document["querySelector"]> = document.querySelector(
         '.joint-link path[joint-selector="line"]',
       );
-      if (header === null || partial === null || link === null)
-        throw new Error("Expected class boxes and ownership link.");
+      if (!header || !partial || !link)
+        window.logAndThrow(new Error("Expected class boxes and ownership link."));
       const markerId: string | undefined = link
         .getAttribute("marker-start")
         ?.match(/#([^\)]+)/)?.[1];
-      const marker: HTMLElement | null =
-        markerId === undefined ? null : document.getElementById(markerId);
+      const markerMarkup: string = markerId ? document.getElementById(markerId)?.innerHTML ?? "" : "";
       return {
         headerHeight: header.getBoundingClientRect().height,
         partialHeight: partial.getBoundingClientRect().height,
         headerFill: header.getAttribute("fill"),
         partialFill: partial.getAttribute("fill"),
-        marker: marker?.innerHTML ?? "",
+        marker: markerMarkup,
         labels: [...document.querySelectorAll(".joint-link text")].map(
           (text) => text.textContent,
         ),

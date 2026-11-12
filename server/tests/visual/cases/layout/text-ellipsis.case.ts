@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
+import { logAndThrow } from "../../logging.js";
 type RectangleT = {
   readonly left: number;
   readonly top: number;
@@ -44,7 +45,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
       ".joint-type-standard-rectangle",
     );
     if (!source || !target)
-      throw new Error("Expected both class boxes.");
+      window.logAndThrow(new Error("Expected both class boxes."));
     const heading: SVGTextElement = source.querySelectorAll("text").item(0);
     const body: SVGTextElement = source.querySelectorAll("text").item(1);
     const targetText: ReturnType<Element["querySelector"]> = target.querySelector("text");
@@ -59,7 +60,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
       !sourceBox ||
       !targetBox
     )
-      throw new Error("Diagram text or bounds are missing.");
+      window.logAndThrow(new Error("Diagram text or bounds are missing."));
     const rows: TextRowT[] = [...body.querySelectorAll(":scope > tspan")].map(
       (row: Element) => ({
         text: row.textContent,
@@ -113,7 +114,7 @@ async function verifyText(
     ) {
       const [index, expected]: [number, string] = __entryValues[__entryIndex]!;
       const row: TextRowT | undefined = actual.rows[index];
-      if (!row) throw new Error("Expected text row.");
+      if (!row) logAndThrow(new Error("Expected text row."));
       assert.ok(
         fitsOrIsEllipsized(row.text, expected),
         `source line ${index + 1} is complete or ellipsized`,

@@ -18,8 +18,8 @@ export function registerClassDeclarationHighlightingCase(): void {
     const source: string = `${text}\n\nModification\n  by: string\n  at: datetime\n\nModificationHistory\n  modifications: Modification[]\n  push(newModification: Modification)\n\nPartial`;
     await editor.fill(source);
     const declarations: readonly {
-      readonly name: string | null;
-      readonly marked: string | null;
+      readonly name: string;
+      readonly marked: string;
       readonly color: string | undefined;
       readonly weight: string | undefined;
       readonly italic: string | undefined;
@@ -33,13 +33,13 @@ export function registerClassDeclarationHighlightingCase(): void {
             /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.textContent ?? ""),
           )
           .map((line: Element) => {
-            const span: HTMLElement | null =
+            const span: ReturnType<HTMLElement["querySelector"]> =
               line.querySelector<HTMLElement>(".dsl-class-name");
-            const style: CSSStyleDeclaration | undefined =
-              span === null ? undefined : getComputedStyle(span);
+            if (!span) window.logAndThrow(new Error("Expected a highlighted class name."));
+            const style: CSSStyleDeclaration = getComputedStyle(span);
             return {
-              name: line.textContent,
-              marked: span?.textContent ?? null,
+              name: line.textContent ?? "",
+              marked: span.textContent ?? "",
               color: style?.color,
               weight: style?.fontWeight,
               italic: style?.fontStyle,
@@ -53,8 +53,8 @@ export function registerClassDeclarationHighlightingCase(): void {
     );
     {
       const __itemValues: readonly {
-        readonly name: string | null;
-        readonly marked: string | null;
+        readonly name: string;
+        readonly marked: string;
         readonly color: string | undefined;
         readonly weight: string | undefined;
         readonly italic: string | undefined;
@@ -66,8 +66,8 @@ export function registerClassDeclarationHighlightingCase(): void {
         __itemIndex += 1
       ) {
         const item: {
-          readonly name: string | null;
-          readonly marked: string | null;
+          readonly name: string;
+          readonly marked: string;
           readonly color: string | undefined;
           readonly weight: string | undefined;
           readonly italic: string | undefined;

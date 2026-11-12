@@ -15,28 +15,23 @@ export function registerHeadingAreaCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const data: {
       headerValue: string;
-      names: (string | null)[];
+      names: Node["textContent"][];
       headerBounds: DOMRect;
       textBounds: DOMRect;
     } = await page.evaluate(() => {
-      const box: Element | null = document.querySelector(
+      const box: ReturnType<Document["querySelector"]> = document.querySelector(
         ".joint-type-standard-headeredrectangle",
       );
-      const header: Element | null | undefined = box?.querySelector(
+      if (!box) window.logAndThrow(new Error("Expected class box."));
+      const header: ReturnType<Element["querySelector"]> = box.querySelector(
         'rect[joint-selector="header"]',
       );
-      const text: SVGTextElement | null | undefined =
-        box?.querySelector("text");
-      if (
-        header === null ||
-        text === null ||
-        header === undefined ||
-        text === undefined
-      )
-        throw new Error("Expected class header.");
+      const text: ReturnType<Element["querySelector"]> = box.querySelector("text");
+      if (!header || !text)
+        window.logAndThrow(new Error("Expected class header."));
       const headerBounds: DOMRect = header.getBoundingClientRect();
       const textBounds: DOMRect = text.getBoundingClientRect();
-      const names: (string | null)[] = [
+      const names: Node["textContent"][] = [
         ...document.querySelectorAll("svg text"),
       ]
         .filter((element) => {

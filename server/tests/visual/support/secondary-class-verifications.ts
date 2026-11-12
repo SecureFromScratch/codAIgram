@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { page } from "../test-support.js";
+import { logAndThrow } from "../logging.js";
 import { assertRedWavyError } from "./method-support.js";
 import {
   isolateSecondaryClass,
@@ -36,7 +37,7 @@ export async function verifySecondaryClassStructure(
         !title ||
         !contents
       )
-        throw new Error("Expected a complete class box.");
+        window.logAndThrow(new Error("Expected a complete class box."));
       return {
         body: body.getBoundingClientRect().toJSON(),
         header: header.getBoundingClientRect().toJSON(),
@@ -75,7 +76,7 @@ export async function verifySecondaryClassStructure(
       const row:
         | { text: string; rect: any; }
         | undefined = geometry.rows[index];
-      if (!row) throw new Error("Expected class member row.");
+      if (!row) logAndThrow(new Error("Expected class member row."));
       assert.ok(
         row.text === expected ||
           ((row.text ?? "").endsWith("…") &&
@@ -287,7 +288,7 @@ export async function verifySecondaryClassTooltipEdges(
               `[data-class-name="${input.name}"] rect`,
             );
             if (!rectangle)
-              throw new Error("Expected secondary class box.");
+              window.logAndThrow(new Error("Expected secondary class box."));
             const box: DOMRect = rectangle.getBoundingClientRect();
             const panel: DOMRect = canvas.getBoundingClientRect();
             canvas.scrollTop +=
@@ -307,7 +308,7 @@ export async function verifySecondaryClassTooltipEdges(
         const fits: boolean = await tooltip.evaluate(
           (element: HTMLElement) => {
             const panel: ReturnType<Element["closest"]> = element.closest(".graph-pane");
-            if (!panel) throw new Error("Expected graph pane.");
+            if (!panel) window.logAndThrow(new Error("Expected graph pane."));
             const tip: DOMRect = element.getBoundingClientRect();
             const panelBounds: DOMRect = panel.getBoundingClientRect();
             return (

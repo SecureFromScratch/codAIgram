@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { test } from 'node:test';
+import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../../../server/dist/app.js';
 import { MemoryClassRepository } from '../../../server/dist/memory-class-repository.js';
+import { loggedFetch } from '../../dist/utils.js';
 
 export const TEST_CASE_METADATA = {
   title: 'uploads the complete, duplicate-free mock test inventory to the shared server',
@@ -37,11 +40,17 @@ const EXPECTED_TESTS: readonly ExpectedTestT[] = [
 function executeScanner(serverUrl: string): Promise<void> {
   const scannerPath: string = path.resolve('dist/index.js');
   const fixturePath: string = path.resolve('mock-testproject');
+  const logDirectory: string = mkdtempSync(path.join(os.tmpdir(), 'codaigram-scanner-tests-upload-'));
+  const logPath: string = path.join(logDirectory, 'scanner.log');
   return new Promise<void>((resolve, reject) => {
-    const processHandle = spawn(process.execPath, [scannerPath, fixturePath, 'mock-testproject', '--types', 'test', '--server-url', serverUrl]);
+    const processHandle = spawn(process.execPath, [scannerPath, 'mock-testproject', fixturePath, '--types', 'test', '--server-url', serverUrl, '--logfile', logPath]);
+    let stderr: string = '';
+    processHandle.stdout.resume();
+    processHandle.stderr.setEncoding('utf8');
+    processHandle.stderr.on('data', (chunk: string) => { stderr += chunk; });
     processHandle.once('error', reject);
-    processHandle.once('exit', (exitCode: number | null) => exitCode === 0 ? resolve() : reject(new Error(`Scanner exited with ${String(exitCode)}.`)));
-  });
+    processHandle.once('close', (exitCode: number | null) => exitCode === 0 ? resolve() : reject(new Error(`Scanner exited with ${String(exitCode)}: ${stderr.trim()}`)));
+  }).finally(() => { rmSync(logDirectory, { recursive: true, force: true }); });
 }
 
 export function registerUploadsMockProjectTestsCase(): void {
@@ -50,7 +59,7 @@ export function registerUploadsMockProjectTestsCase(): void {
     const server = createApp(new MemoryClassRepository()).listen(5187, '127.0.0.1');
     try {
       await executeScanner(serverUrl);
-      const response: Response = await fetch(`${serverUrl}/api/getTests`);
+      const response: Response = await loggedFetch(`${serverUrl}/api/getTests`);
       assert.equal(response.status, 200);
       const actualTests: readonly ExpectedTestT[] = await response.json() as readonly ExpectedTestT[];
       assert.deepEqual(actualTests, EXPECTED_TESTS);

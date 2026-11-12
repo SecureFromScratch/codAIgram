@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loggedFetch } from "../../../dist/utils.js";
 import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -33,7 +34,7 @@ export function registerRequestedOrderCase(): void {
         ) {
           const item: (typeof INITIAL_CLASSES)[number] =
             __itemValues[__itemIndex]!;
-          await database.collection(collection).doc(item.name).create(item);
+          await new FirestoreClassRepository(database, collection).updateClasses([item]);
         }
       }
       const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
@@ -47,7 +48,7 @@ export function registerRequestedOrderCase(): void {
         );
         const address: ReturnType<Server["address"]> = server.address();
         assert.ok(address && typeof address !== "string");
-        const response: Response = await fetch(
+        const response: Response = await loggedFetch(
           `http://127.0.0.1:${String(address.port)}/api/classesDetails`,
           {
             method: "POST",

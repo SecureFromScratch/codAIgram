@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
+import { logAndThrow } from "../../logging.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 import type { ClassDetails } from "../../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
@@ -16,12 +17,12 @@ export const TEST_CASE_METADATA: {
 };
 export function registerMissingOwnedNonpartialCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    await page.route("**/api/classesDetails", async (route) => {
+    await page.route("**/api/getClasses", async (route) => {
       const response: import("playwright").APIResponse = await route.fetch();
       const body: ClassDetails[] = await response.json();
       const target: ClassDetails | undefined = body.find((item) => item.name === "Class");
       if (!target)
-        throw new Error("Expected the Class details response.");
+        logAndThrow(new Error("Expected the Class details response."));
       target.isPartial = false;
       await route.fulfill({ response, json: body });
     });
@@ -40,7 +41,7 @@ export function registerMissingOwnedNonpartialCase(): void {
       assert.ok(targets.includes("Class"));
       assert.ok(targets.includes("?"));
     } finally {
-      await page.unroute("**/api/classesDetails");
+      await page.unroute("**/api/getClasses");
     }
   });
 }

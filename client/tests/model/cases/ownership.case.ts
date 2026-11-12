@@ -3,10 +3,10 @@ import { parseDiagram } from '../../../src/model';
 import type { TestCaseMetadataT } from '../../test-case-metadata';
 
 export const TEST_CASE_METADATA: TestCaseMetadataT = {
-  title: 'parses single, many, unnamed, and incomplete ownership',
+  title: 'parses OWNS, REF, and UNK class connections',
   prompt: {
     availability: 'available',
-    text: 'Test OWNS changes for singular and many arity, missing relation names, and incomplete referenced types.'
+    text: 'Support OWNS, REF, and UNK relationship keywords with single and many arities, unnamed references, and incomplete targets.'
   }
 };
 
@@ -15,18 +15,62 @@ export function registerOwnershipCase(): void {
     expect(parseDiagram('Diagram\nOWNS item: Item')).toMatchObject({
       ok: true,
       diagram: {
-        targets: [{ name: 'item', target: 'Item', multiplicity: 'one' }] } });
+        targets: [{
+          kind: 'OWNS',
+          name: 'item',
+          target: 'Item',
+          multiplicity: 'one'
+        }]
+      }
+    });
     expect(parseDiagram('Diagram\nOWNS Item[]')).toMatchObject({
       ok: true,
       diagram: {
-        targets: [{ name: '', target: 'Item', multiplicity: 'many' }] } });
+        targets: [{
+          kind: 'OWNS',
+          name: '',
+          target: 'Item',
+          multiplicity: 'many'
+        }]
+      }
+    });
+    expect(parseDiagram('Diagram\nREF reference: Referenced')).toMatchObject({
+      ok: true,
+      diagram: {
+        targets: [{
+          kind: 'REF',
+          name: 'reference',
+          target: 'Referenced',
+          multiplicity: 'one'
+        }]
+      }
+    });
+    expect(parseDiagram('Diagram\nUNK unknown: Unknown[]')).toMatchObject({
+      ok: true,
+      diagram: {
+        targets: [{
+          kind: 'UNK',
+          name: 'unknown',
+          target: 'Unknown',
+          multiplicity: 'many'
+        }]
+      }
+    });
     expect(parseDiagram('Diagram\nOWNS item:')).toMatchObject({
       ok: false,
       diagram: {
-        targets: [{ name: 'item', target: '?', multiplicity: 'one' }] } });
+        targets: [{
+          kind: 'OWNS',
+          name: 'item',
+          target: '?',
+          multiplicity: 'one'
+        }]
+      }
+    });
     expect(parseDiagram('Diagram\nitem: Item[]')).toMatchObject({
       ok: false,
       partialRetention: 'retain',
-      diagram: { targets: [] } });
+      diagram: { targets: [] }
+    });
   });
 }

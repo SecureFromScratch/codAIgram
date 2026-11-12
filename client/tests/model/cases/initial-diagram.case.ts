@@ -17,7 +17,12 @@ export function registerInitialDiagramCase(): void {
     if (result.ok) {
       expect(result.diagram.title).toBe('ClassDiagram');
       expect(result.diagram.members).toHaveLength(4);
-      expect(result.diagram.targets).toEqual([{ name: 'classes', target: 'Class', multiplicity: 'many' }]);
+      expect(result.diagram.targets).toEqual([{
+        kind: 'OWNS',
+        name: 'classes',
+        target: 'Class',
+        multiplicity: 'many'
+      }]);
     }
   });
 }

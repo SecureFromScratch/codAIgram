@@ -13,7 +13,7 @@ export async function checkTooltipAtPanelEdge(
           ".joint-type-standard-headeredrectangle rect",
         );
         const viewport: DOMRect = element.getBoundingClientRect();
-        if (!box) throw new Error("Expected the ClassDiagram box.");
+        if (!box) window.logAndThrow(new Error("Expected the ClassDiagram box."));
         const rectangle: DOMRect = box.getBoundingClientRect();
         element.scrollTop +=
           edgeName === "top"
@@ -33,7 +33,7 @@ export async function checkTooltipAtPanelEdge(
         const box: ReturnType<Element["querySelector"]> = element.querySelector(
           ".joint-type-standard-headeredrectangle rect",
         );
-        if (!box) throw new Error("Expected the ClassDiagram box.");
+        if (!box) window.logAndThrow(new Error("Expected the ClassDiagram box."));
         const rectangle: DOMRect = box.getBoundingClientRect();
         const panel: DOMRect = element.getBoundingClientRect();
         return {
@@ -66,7 +66,7 @@ export async function checkTooltipAtPanelEdge(
         element: HTMLElement,
       ) => {
         const panel: ReturnType<Element["closest"]> = element.closest(".graph-pane");
-        if (!panel) throw new Error("Expected the graph pane.");
+        if (!panel) window.logAndThrow(new Error("Expected the graph pane."));
         return {
           tip: element.getBoundingClientRect(),
           panel: panel.getBoundingClientRect(),

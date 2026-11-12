@@ -21,7 +21,7 @@ export function registerClassBoxWidthCase(): void {
         ".joint-type-standard-rectangle rect",
       );
       if (!source || !target)
-        throw new Error("Expected class boxes.");
+        window.logAndThrow(new Error("Expected class boxes."));
       return {
         source: source.getBoundingClientRect().width,
         target: target.getBoundingClientRect().width,
