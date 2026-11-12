@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
 import { MemoryClassRepository } from "../../../dist/memory-class-repository.js";
+import type { ClassDetails } from "../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: { availability: string; reason: string; };
@@ -20,15 +22,10 @@ export function registerUpdateClassesCase(): void {
       await new Promise<void>((resolve) =>
         server.once("listening", resolve),
       );
-      const address: ReturnType<typeof server.address> = server.address();
-      assert.ok(address !== null && typeof address !== "string");
+      const address: ReturnType<Server["address"]> = server.address();
+      assert.ok(address && typeof address !== "string");
       const base: string = `http://127.0.0.1:${String(address.port)}/api`;
-      const updates: {
-        name: string;
-        methods: string[];
-        relations: never[];
-        isPartial: boolean;
-      }[] = [
+      const updates: ClassDetails[] = [
         {
           name: "NewClass",
           methods: ["run(value: string)"],
@@ -57,7 +54,7 @@ export function registerUpdateClassesCase(): void {
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error?: Error) =>
-          error === undefined ? resolve() : reject(error),
+          error ? reject(error) : resolve(),
         ),
       );
     }

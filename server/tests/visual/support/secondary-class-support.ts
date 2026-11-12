@@ -27,7 +27,7 @@ export function getSecondaryClassFixture(name: string): SecondaryClassFixtureT {
   const fixture: SecondaryClassFixtureT | undefined = SECONDARY_CLASSES.find(
     (item: SecondaryClassFixtureT) => item.name === name,
   );
-  if (fixture === undefined)
+  if (!fixture)
     throw new Error(`No secondary class fixture named ${name}.`);
   return fixture;
 }

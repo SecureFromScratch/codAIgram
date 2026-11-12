@@ -63,13 +63,13 @@ export function registerMethodSignaturesCase(): void {
       (
         element: HTMLElement,
       ) => {
-        const signature: HTMLElement | null =
+        const signature: ReturnType<HTMLElement["querySelector"]> =
           element.querySelector<HTMLElement>(".tooltip-signature");
-        if (signature === null)
+        if (!signature)
           throw new Error("Expected a tooltip signature.");
-        const parentheses: HTMLElement | null =
+        const parentheses: ReturnType<HTMLElement["querySelector"]> =
           signature.querySelector<HTMLElement>(".tooltip-paren");
-        if (parentheses === null)
+        if (!parentheses)
           throw new Error("Expected tooltip parentheses.");
         const signatureNames: HTMLElement[] = [
           ...signature.querySelectorAll<HTMLElement>(

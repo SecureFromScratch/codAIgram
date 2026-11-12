@@ -21,7 +21,7 @@ export function registerStartupLoadsDiagramCase(): void {
     await page.reload();
     assert.deepEqual((await request).postDataJSON(), { classNames: ["ClassDiagram", "Class"], });
     await page.locator(".joint-type-standard-headeredrectangle").waitFor();
-    const editorText: string | null = await page
+    const editorText: Awaited<ReturnType<import("playwright").Locator["textContent"]>> = await page
       .getByRole("textbox", { name: "Diagram text" })
       .textContent();
     assert.ok(

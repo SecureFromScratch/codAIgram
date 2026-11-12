@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -7,6 +8,7 @@ import {
   FirestoreClassRepository,
 } from "../../../dist/firestore-repository.js";
 import { INITIAL_CLASSES } from "../../../dist/memory-class-repository.js";
+import type { ClassDetails } from "../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: { availability: string; reason: string; };
@@ -21,12 +23,7 @@ export function registerPersistAndReadCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const database: FirebaseFirestore.Firestore = createLocalFirestore();
     const collection: string = `codaigram_test_${randomUUID().replaceAll("-", "")}`;
-    const added: {
-      name: string;
-      methods: string[];
-      relations: never[];
-      isPartial: boolean;
-    } = {
+    const added: ClassDetails = {
       name: "IntegrationAdded",
       methods: ["save(value: string)"],
       relations: [],
@@ -55,15 +52,10 @@ export function registerPersistAndReadCase(): void {
         await new Promise<void>((resolve) =>
           server.once("listening", resolve),
         );
-        const address: ReturnType<typeof server.address> = server.address();
-        assert.ok(address !== null && typeof address !== "string");
+        const address: ReturnType<Server["address"]> = server.address();
+        assert.ok(address && typeof address !== "string");
         const base: string = `http://127.0.0.1:${String(address.port)}/api`;
-        const changed: {
-          name: string;
-          methods: string[];
-          relations: never[];
-          isPartial: boolean;
-        } = {
+        const changed: ClassDetails = {
           name: "Class",
           methods: ["inspect()"],
           relations: [],
@@ -84,7 +76,7 @@ export function registerPersistAndReadCase(): void {
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error?: Error) =>
-            error === undefined ? resolve() : reject(error),
+            error ? reject(error) : resolve(),
           ),
         );
       }

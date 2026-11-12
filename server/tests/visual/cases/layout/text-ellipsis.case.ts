@@ -9,17 +9,20 @@ type RectangleT = {
   readonly width: number;
   readonly height: number;
 };
-type TextRowT = { readonly text: string | null; readonly rect: RectangleT; };
+type TextRowT = {
+  readonly text: Node["textContent"];
+  readonly rect: RectangleT;
+};
 type DiagramTextT = {
-  readonly heading: string | null;
+  readonly heading: Node["textContent"];
   readonly headingRect: RectangleT;
   readonly headerRect: RectangleT;
   readonly rows: readonly TextRowT[];
   readonly sourceRect: RectangleT;
-  readonly target: string | null;
+  readonly target: Node["textContent"];
   readonly targetRect: RectangleT;
   readonly targetBoxRect: RectangleT;
-  readonly marker: readonly (string | null)[];
+  readonly marker: readonly Node["textContent"][];
 };
 export const TEST_CASE_METADATA: {
   title: string;
@@ -34,27 +37,27 @@ export const TEST_CASE_METADATA: {
 };
 async function inspectDiagramText(): Promise<DiagramTextT> {
   return page.evaluate(() => {
-    const source: Element | null = document.querySelector(
+    const source: ReturnType<Document["querySelector"]> = document.querySelector(
       ".joint-type-standard-headeredrectangle",
     );
-    const target: Element | null = document.querySelector(
+    const target: ReturnType<Document["querySelector"]> = document.querySelector(
       ".joint-type-standard-rectangle",
     );
-    if (source === null || target === null)
+    if (!source || !target)
       throw new Error("Expected both class boxes.");
     const heading: SVGTextElement = source.querySelectorAll("text").item(0);
     const body: SVGTextElement = source.querySelectorAll("text").item(1);
-    const targetText: SVGTextElement | null = target.querySelector("text");
+    const targetText: ReturnType<Element["querySelector"]> = target.querySelector("text");
     const header: SVGRectElement = source.querySelectorAll("rect").item(1);
-    const sourceBox: SVGRectElement | null = source.querySelector("rect");
-    const targetBox: SVGRectElement | null = target.querySelector("rect");
+    const sourceBox: ReturnType<Element["querySelector"]> = source.querySelector("rect");
+    const targetBox: ReturnType<Element["querySelector"]> = target.querySelector("rect");
     if (
-      heading === null ||
-      body === null ||
-      targetText === null ||
-      header === null ||
-      sourceBox === null ||
-      targetBox === null
+      !heading ||
+      !body ||
+      !targetText ||
+      !header ||
+      !sourceBox ||
+      !targetBox
     )
       throw new Error("Diagram text or bounds are missing.");
     const rows: TextRowT[] = [...body.querySelectorAll(":scope > tspan")].map(
@@ -78,7 +81,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
     };
   });
 }
-function fitsOrIsEllipsized(shown: string | null, full: string): boolean {
+function fitsOrIsEllipsized(shown: Node["textContent"], full: string): boolean {
   return (
     shown === full ||
     (shown?.endsWith("…") === true && full.startsWith(shown.slice(0, -1)))
@@ -110,7 +113,7 @@ async function verifyText(
     ) {
       const [index, expected]: [number, string] = __entryValues[__entryIndex]!;
       const row: TextRowT | undefined = actual.rows[index];
-      if (row === undefined) throw new Error("Expected text row.");
+      if (!row) throw new Error("Expected text row.");
       assert.ok(
         fitsOrIsEllipsized(row.text, expected),
         `source line ${index + 1} is complete or ellipsized`,

@@ -12,20 +12,20 @@ export type DiagramInspectionT = {
   readonly box: BoundsT;
   readonly headerText: BoundsT;
   readonly bodyText: BoundsT;
-  readonly headerValue: string | null;
+  readonly headerValue: Node["textContent"];
   readonly bodyValue: string;
-  readonly inHeader: readonly (string | null)[];
+  readonly inHeader: readonly Node["textContent"][];
   readonly target: BoundsT;
 };
 export async function inspectDiagram(): Promise<DiagramInspectionT> {
   return page.evaluate(() => {
-    const source: Element | null = document.querySelector(
+    const source: ReturnType<Document["querySelector"]> = document.querySelector(
       ".joint-type-standard-headeredrectangle",
     );
-    const target: Element | null = document.querySelector(
+    const target: ReturnType<Document["querySelector"]> = document.querySelector(
       ".joint-type-standard-rectangle",
     );
-    if (source === null || target === null)
+    if (!source || !target)
       throw new Error("Expected both class boxes.");
     const rectangles: NodeListOf<SVGRectElement> =
       source.querySelectorAll("rect");
@@ -37,10 +37,10 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
     const headerText: SVGTextElement = text.item(0);
     const bodyText: SVGTextElement = text.item(1);
     if (
-      bodyRectangle === null ||
-      headerRectangle === null ||
-      headerText === null ||
-      bodyText === null
+      !bodyRectangle ||
+      !headerRectangle ||
+      !headerText ||
+      !bodyText
     )
       throw new Error("Expected a complete class box.");
     const bounds: (element: Element) => BoundsT = (
@@ -65,7 +65,7 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       first.right > second.left &&
       first.top < second.bottom &&
       first.bottom > second.top;
-    const inHeader: (string | null)[] = [
+    const inHeader: Node["textContent"][] = [
       ...document.querySelectorAll("svg text"),
     ]
       .filter((element: Element) =>
@@ -89,8 +89,8 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
           .join(""),
       )
       .join("");
-    const targetRectangle: SVGRectElement | null = target.querySelector("rect");
-    if (targetRectangle === null)
+    const targetRectangle: ReturnType<Element["querySelector"]> = target.querySelector("rect");
+    if (!targetRectangle)
       throw new Error("Expected a target class box.");
     return {
       header,

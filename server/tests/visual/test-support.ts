@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:net";
 import { after, before, beforeEach } from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
@@ -27,7 +28,7 @@ export function registerVisualLifecycle(): void {
     await server.listen();
     const httpServer: ViteDevServer["httpServer"] = server.httpServer;
     assert.ok(httpServer !== null);
-    const address: ReturnType<typeof httpServer.address> = httpServer.address();
+    const address: ReturnType<Server["address"]> = httpServer.address();
     assert.ok(address !== null && typeof address !== "string");
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });

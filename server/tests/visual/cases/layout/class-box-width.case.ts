@@ -14,13 +14,13 @@ export const TEST_CASE_METADATA: {
 export function registerClassBoxWidthCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const widths: { readonly source: number; readonly target: number; } = await page.evaluate(() => {
-      const source: Element | null = document.querySelector(
+      const source: ReturnType<Document["querySelector"]> = document.querySelector(
         ".joint-type-standard-headeredrectangle rect",
       );
-      const target: Element | null = document.querySelector(
+      const target: ReturnType<Document["querySelector"]> = document.querySelector(
         ".joint-type-standard-rectangle rect",
       );
-      if (source === null || target === null)
+      if (!source || !target)
         throw new Error("Expected class boxes.");
       return {
         source: source.getBoundingClientRect().width,

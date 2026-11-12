@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
+import type { ClassDetails } from "../../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: { availability: string; text: string; };
@@ -17,11 +18,9 @@ export function registerMissingOwnedNonpartialCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     await page.route("**/api/classesDetails", async (route) => {
       const response: import("playwright").APIResponse = await route.fetch();
-      const body: { name: string; isPartial: boolean; }[] = await response.json();
-      const target:
-        | { name: string; isPartial: boolean; }
-        | undefined = body.find((item) => item.name === "Class");
-      if (target === undefined)
+      const body: ClassDetails[] = await response.json();
+      const target: ClassDetails | undefined = body.find((item) => item.name === "Class");
+      if (!target)
         throw new Error("Expected the Class details response.");
       target.isPartial = false;
       await route.fulfill({ response, json: body });

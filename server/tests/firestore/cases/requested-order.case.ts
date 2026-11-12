@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -44,8 +45,8 @@ export function registerRequestedOrderCase(): void {
         await new Promise<void>((resolve) =>
           server.once("listening", resolve),
         );
-        const address: ReturnType<typeof server.address> = server.address();
-        assert.ok(address !== null && typeof address !== "string");
+        const address: ReturnType<Server["address"]> = server.address();
+        assert.ok(address && typeof address !== "string");
         const response: Response = await fetch(
           `http://127.0.0.1:${String(address.port)}/api/classesDetails`,
           {
@@ -64,7 +65,7 @@ export function registerRequestedOrderCase(): void {
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error?: Error) =>
-            error === undefined ? resolve() : reject(error),
+            error ? reject(error) : resolve(),
           ),
         );
       }

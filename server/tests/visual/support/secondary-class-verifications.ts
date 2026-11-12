@@ -31,10 +31,10 @@ export async function verifySecondaryClassStructure(
       const title: SVGTextElement = element.querySelectorAll("text").item(0);
       const contents: SVGTextElement = element.querySelectorAll("text").item(1);
       if (
-        body === null ||
-        header === null ||
-        title === null ||
-        contents === null
+        !body ||
+        !header ||
+        !title ||
+        !contents
       )
         throw new Error("Expected a complete class box.");
       return {
@@ -75,7 +75,7 @@ export async function verifySecondaryClassStructure(
       const row:
         | { text: string; rect: any; }
         | undefined = geometry.rows[index];
-      if (row === undefined) throw new Error("Expected class member row.");
+      if (!row) throw new Error("Expected class member row.");
       assert.ok(
         row.text === expected ||
           ((row.text ?? "").endsWith("…") &&
@@ -283,10 +283,10 @@ export async function verifySecondaryClassTooltipEdges(
             canvas: Element,
             input: { readonly name: string; readonly side: "top" | "bottom"; },
           ) => {
-            const rectangle: Element | null = canvas.querySelector(
+            const rectangle: ReturnType<Element["querySelector"]> = canvas.querySelector(
               `[data-class-name="${input.name}"] rect`,
             );
-            if (rectangle === null)
+            if (!rectangle)
               throw new Error("Expected secondary class box.");
             const box: DOMRect = rectangle.getBoundingClientRect();
             const panel: DOMRect = canvas.getBoundingClientRect();
@@ -306,8 +306,8 @@ export async function verifySecondaryClassTooltipEdges(
         await tooltip.waitFor();
         const fits: boolean = await tooltip.evaluate(
           (element: HTMLElement) => {
-            const panel: Element | null = element.closest(".graph-pane");
-            if (panel === null) throw new Error("Expected graph pane.");
+            const panel: ReturnType<Element["closest"]> = element.closest(".graph-pane");
+            if (!panel) throw new Error("Expected graph pane.");
             const tip: DOMRect = element.getBoundingClientRect();
             const panelBounds: DOMRect = panel.getBoundingClientRect();
             return (
