@@ -13,7 +13,7 @@ export function startLoopbackListener(server: http.Server): Promise<AddressInfo>
         const onListening = (): void => {
             server.removeListener("error", onError);
             const address = server.address();
-            if (address === null || typeof address === "string" || address.address !== host ||
+            if (!address || typeof address === "string" || address.address !== host ||
                 !Number.isInteger(address.port) || address.port < 1 || address.port > 65_535) {
                 reject(new Error("The CodAIgram Bridge listener returned an invalid listening address."));
                 return;

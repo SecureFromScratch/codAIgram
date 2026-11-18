@@ -4,13 +4,15 @@ import * as vscode from "vscode";
 import { WebSocket, WebSocketServer } from "ws";
 import { ConnectionStatus } from "./connectionStatus";
 import { startLoopbackListener } from "./listenerStartup";
+import { err, ok } from "neverthrow";
+import type { Result } from "neverthrow";
 
 const host: "127.0.0.1" = "127.0.0.1";
 
-let output: vscode.OutputChannel | undefined;
-let server: http.Server | undefined;
-let webSocketServer: WebSocketServer | undefined;
-let connectionStatus: ConnectionStatus | undefined;
+let output: Result<vscode.OutputChannel, string> = err("Output channel is inactive");
+let server: Result<http.Server, string> = err("Server is inactive");
+let webSocketServer: Result<WebSocketServer, string> = err("WebSocket server is inactive");
+let connectionStatus: Result<ConnectionStatus, string> = err("Status is inactive");
 const clients: Set<WebSocket> = new Set<WebSocket>();
 
 export interface CodAIgramBridgeApi {
@@ -21,15 +23,17 @@ export interface CodAIgramBridgeApi {
 export async function activate(context: vscode.ExtensionContext): Promise<CodAIgramBridgeApi> {
     let token = randomBytes(32).toString("base64url");
     let tokenState: "available" | "reserved" | "consumed" = "available";
-    output = vscode.window.createOutputChannel("CodAIgram Bridge");
-    output.appendLine("CodAIgram Bridge activating.");
-    connectionStatus = new ConnectionStatus(vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100));
-    context.subscriptions.push(connectionStatus);
+    const activeOutput = vscode.window.createOutputChannel("CodAIgram Bridge");
+    output = ok(activeOutput);
+    activeOutput.appendLine("CodAIgram Bridge activating.");
+    const activeStatus = new ConnectionStatus(vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100));
+    connectionStatus = ok(activeStatus);
+    context.subscriptions.push(activeStatus);
 
     context.subscriptions.push(vscode.commands.registerCommand("codaigram-bridge.showConnectionUrl", async () => {
-        const activeServer = server;
-        const address = activeServer?.address();
-        if (address === null || address === undefined || typeof address === "string") {
+        if (server.isErr()) return;
+        const address = server.value.address();
+        if (!address || typeof address === "string") {
             return;
         }
 
@@ -61,8 +65,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand("codaigram-bridge.copyConnectionUrl", async () => {
-        const address = server?.address();
-        if (address === null || address === undefined || typeof address === "string") {
+        if (server.isErr()) return;
+        const address = server.value.address();
+        if (!address || typeof address === "string") {
             return;
         }
 
@@ -92,41 +97,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         response.end("Not Found");
     });
 
-    const wsServer: import("C:/Users/yariv/source/Effective/ts/codaigram/codAIgram-bridge/node_modules/@types/ws/index").Server<typeof import("C:/Users/yariv/source/Effective/ts/codaigram/codAIgram-bridge/node_modules/@types/ws/index"), typeof http.IncomingMessage> = new WebSocketServer({ noServer: true });
-    webSocketServer = wsServer;
+    const wsServer: WebSocketServer = new WebSocketServer({ noServer: true });
+    webSocketServer = ok(wsServer);
     wsServer.on("connection", (client) => {
         clients.add(client);
-        connectionStatus?.connected();
-        output?.appendLine("CodAIgram Bridge WebSocket client connected.");
+        if (connectionStatus.isOk()) connectionStatus.value.connected();
+        if (output.isOk()) output.value.appendLine("CodAIgram Bridge WebSocket client connected.");
         client.once("close", () => {
             clients.delete(client);
-            connectionStatus?.disconnected();
+            if (connectionStatus.isOk()) connectionStatus.value.disconnected();
             if (clients.size === 0) {
                 token = randomBytes(32).toString("base64url");
                 tokenState = "available";
             }
-            output?.appendLine("CodAIgram Bridge WebSocket client disconnected.");
+            if (output.isOk()) output.value.appendLine("CodAIgram Bridge WebSocket client disconnected.");
         });
         client.on("error", (error) => {
-            output?.appendLine(`CodAIgram Bridge WebSocket client error: ${error.message}`);
+            if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket client error: ${error.message}`);
         });
         client.send("Hello");
     });
     wsServer.on("error", (error) => {
-        output?.appendLine(`CodAIgram Bridge WebSocket server error: ${error.message}`);
+        if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket server error: ${error.message}`);
     });
     httpServer.on("upgrade", (request, socket, head) => {
         const rejectUnauthorized = (): void => {
-            output?.appendLine("CodAIgram Bridge rejected an unauthenticated WebSocket connection.");
+            if (output.isOk()) output.value.appendLine("CodAIgram Bridge rejected an unauthenticated WebSocket connection.");
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
             socket.destroy();
         };
         const listeningAddress = httpServer.address();
-        const expectedPort = listeningAddress !== null && typeof listeningAddress !== "string"
-            ? listeningAddress.port
-            : undefined;
+        if (!listeningAddress || typeof listeningAddress === "string") {
+            rejectUnauthorized();
+            return;
+        }
+        const expectedPort = listeningAddress.port;
         const suppliedHost = request.headers.host;
-        if (expectedPort === undefined || typeof suppliedHost !== "string" ||
+        if (typeof suppliedHost !== "string" ||
             (suppliedHost !== `localhost:${expectedPort}` && suppliedHost !== `127.0.0.1:${expectedPort}`)) {
             rejectUnauthorized();
             return;
@@ -166,34 +173,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
             wsServer.handleUpgrade(request, socket, head, (client) => {
                 upgradeCompleted = true;
                 tokenState = "consumed";
-                output?.appendLine("CodAIgram Bridge authenticated a WebSocket client.");
+                if (output.isOk()) output.value.appendLine("CodAIgram Bridge authenticated a WebSocket client.");
                 wsServer.emit("connection", client, request);
             });
         } catch (error: unknown) {
             tokenState = "available";
             const message = error instanceof Error ? error.message : String(error);
-            output?.appendLine(`CodAIgram Bridge WebSocket upgrade failed: ${message}`);
+            if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket upgrade failed: ${message}`);
             socket.destroy();
         }
     });
 
-    server = httpServer;
+    server = ok(httpServer);
     let listeningAddress;
     try {
         listeningAddress = await startLoopbackListener(httpServer);
     } catch (error: unknown) {
-        server = undefined;
-        webSocketServer = undefined;
-        connectionStatus?.dispose();
-        connectionStatus = undefined;
+        server = err("Server is inactive");
+        webSocketServer = err("WebSocket server is inactive");
+        if (connectionStatus.isOk()) connectionStatus.value.dispose();
+        connectionStatus = err("Status is inactive");
         wsServer.close();
-        output?.appendLine(`CodAIgram Bridge listener failed to start: ${error instanceof Error ? error.message : String(error)}`);
-        output?.dispose();
-        output = undefined;
+        if (output.isOk()) output.value.appendLine(`CodAIgram Bridge listener failed to start: ${error instanceof Error ? error.message : String(error)}`);
+        if (output.isOk()) output.value.dispose();
+        output = err("Output channel is inactive");
         throw error;
     }
 
-    output?.appendLine(`CodAIgram Bridge listening on ws://${host}:${listeningAddress.port}`);
+    if (output.isOk()) output.value.appendLine(`CodAIgram Bridge listening on ws://${host}:${listeningAddress.port}`);
     return {
         port: listeningAddress.port,
         get token() {
@@ -217,35 +224,35 @@ function isAllowedOrigin(suppliedOrigin: string, trustedOrigins: readonly string
 }
 
 export async function deactivate(): Promise<void> {
-    connectionStatus?.dispose();
-    connectionStatus = undefined;
+    if (connectionStatus.isOk()) connectionStatus.value.dispose();
+    connectionStatus = err("Status is inactive");
     const webSocketServerToClose = webSocketServer;
-    webSocketServer = undefined;
+    webSocketServer = err("WebSocket server is inactive");
     for (const client of clients) {
         client.terminate();
     }
     clients.clear();
-    if (webSocketServerToClose !== undefined) {
+    if (webSocketServerToClose.isOk()) {
         await new Promise<void>((resolve) => {
-            webSocketServerToClose.close(() => resolve());
+            webSocketServerToClose.value.close(() => resolve());
         });
     }
 
     const serverToClose = server;
-    server = undefined;
+    server = err("Server is inactive");
 
-    if (serverToClose !== undefined) {
+    if (serverToClose.isOk()) {
         await new Promise<void>((resolve) => {
-            serverToClose.close((error) => {
-                if (error !== undefined) {
-                    output?.appendLine(`CodAIgram Bridge failed to close its server: ${error.message}`);
+            serverToClose.value.close((error) => {
+                if (error) {
+                    if (output.isOk()) output.value.appendLine(`CodAIgram Bridge failed to close its server: ${error.message}`);
                 }
                 resolve();
             });
         });
-        output?.appendLine("CodAIgram Bridge server stopped.");
+        if (output.isOk()) output.value.appendLine("CodAIgram Bridge server stopped.");
     }
 
-    output?.dispose();
-    output = undefined;
+    if (output.isOk()) output.value.dispose();
+    output = err("Output channel is inactive");
 }
