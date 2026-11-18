@@ -118,3 +118,13 @@ Stop each process with Ctrl+C in its terminal. Do not stop an emulator or server
 - If a local support package is missing after an npm install, rerun `npm run bootstrap`.
 
 Cloud credentials, production hosting, authentication, and persistent user documents are not configured by this local-only setup. The workbench's emulator export is local developer state only. Document any future startup or emulator setup changes here.
+
+## CodAIgram Bridge VS Code extension
+
+`codAIgram-bridge/` is an independent sibling VS Code extension project. Its
+Step 1 HTTP listener is intentionally loopback-only and always uses port
+`11100`. From that directory, run `npm install` followed by `npm test` to build
+the current TypeScript source and run its real Extension Development Host
+integration test. For manual debugging, open the extension folder in VS Code
+and press F5; the test and manual host require a desktop/Electron display (or
+Xvfb-equivalent on headless Linux).
