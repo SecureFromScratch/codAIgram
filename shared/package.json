@@ -11,6 +11,14 @@
     "./json-map": {
       "types": "./dist/json-map.d.ts",
       "default": "./dist/json-map.js"
+    },
+    "./model/class": {
+      "types": "./dist/model/class.d.ts",
+      "default": "./dist/model/class.js"
+    },
+    "./model/test": {
+      "types": "./dist/model/test.d.ts",
+      "default": "./dist/model/test.js"
     }
   }
 }

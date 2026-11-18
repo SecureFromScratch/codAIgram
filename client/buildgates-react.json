@@ -6,7 +6,7 @@
         { 
             "symbol": "fetch", 
             "message": "Use loggedFetch for HTTP requests.",
-            "allowPaths": ["client/src/utils.ts"]
+            "allowPaths": ["client/src/client_utils.ts"]
         }, { 
             "symbol": "window.setTimeout", 
             "message": "Use the owned click timer.", 
