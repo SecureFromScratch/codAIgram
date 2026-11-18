@@ -6,13 +6,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../../../server/dist/app.js';
 import { MemoryClassRepository } from '../../../server/dist/memory-class-repository.js';
-import { loggedFetch } from '../../dist/utils.js';
+import { loggedFetch } from '../../dist/scanner_utils.js';
 
 export const TEST_CASE_METADATA = {
   title: 'uploads the complete, duplicate-free mock test inventory to the shared server',
   prompt: {
     availability: 'available',
-    text: 'Start an in-memory server, execute Scanner against the fixed mock project, and assert getTests returns every expected group, case, description, and prompt without duplicates.'
+    old: 'Start an in-memory server, execute Scanner against the fixed mock project, and assert getTests returns every expected group, case, description, and prompt without duplicates.'
+  ,
+    history: [
+      { when: "2026/11/15 09:35", text: "write a test. it starts an in-memory server, executes the scanner on the mock test. it then calls getTests route on the erver. this returns a list of all tests. for each test we have its group, name, description, prompt.\nensure this list is identical to the groups/test cases in the mock project (you can hardcode this as the mock project tests lists will NOT be changes - they are for testing only)" },
+      { when: "2026/11/15 09:35", text: "--server-url is a good idea. the server itself is the same server that is in this project.\nno - there is no protocol yet. write the test and then when it fails (the server will report 404) fix the server by adding an updateTests route, accepting a list of tests.\nbtw: when writing the above mentioned test - make sure the result does not contain duplicates (a count can be used)" },
+      { when: "2026/11/15 09:35", text: "in the test use --server-url localhost:5187" },
+    ],
   }
 };
 
@@ -38,8 +44,8 @@ const EXPECTED_TESTS: readonly ExpectedTestT[] = [
 ];
 
 function executeScanner(serverUrl: string): Promise<void> {
-  const scannerPath: string = path.resolve('dist/index.js');
-  const fixturePath: string = path.resolve('mock-testproject');
+  const scannerPath: string = path.resolve('scanner/dist/index.js');
+  const fixturePath: string = path.resolve('scanner/mock-testproject');
   const logDirectory: string = mkdtempSync(path.join(os.tmpdir(), 'codaigram-scanner-tests-upload-'));
   const logPath: string = path.join(logDirectory, 'scanner.log');
   return new Promise<void>((resolve, reject) => {
@@ -61,9 +67,26 @@ export function registerUploadsMockProjectTestsCase(): void {
       await executeScanner(serverUrl);
       const response: Response = await loggedFetch(`${serverUrl}/api/getTests`);
       assert.equal(response.status, 200);
-      const actualTests: readonly ExpectedTestT[] = await response.json() as readonly ExpectedTestT[];
-      assert.deepEqual(actualTests, EXPECTED_TESTS);
-      const uniqueKeys: Set<string> = new Set<string>(actualTests.map((item: ExpectedTestT) => `${item.group}.${item.name}`));
+      const actualTests: readonly { group: string; name: string; description: string; lastChangedAt: string }[] = await response.json() as readonly { group: string; name: string; description: string; lastChangedAt: string }[];
+      assert.deepEqual(actualTests.map(({ group, name, description }) => ({ group, name, description })), EXPECTED_TESTS.map(({ group, name, description }) => ({ group, name, description })));
+      actualTests.forEach((item) => { assert.ok(!('prompt' in item)); assert.ok(!Number.isNaN(Date.parse(item.lastChangedAt))); });
+      const historyResponse: Response = await loggedFetch(`${serverUrl}/api/getHistory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(EXPECTED_TESTS.map(({ group, name }) => ({ group, name }))),
+      });
+      assert.equal(historyResponse.status, 200);
+      const histories: readonly { group: string; name: string; prompts: { when: string; text: string }[] }[] = await historyResponse.json() as readonly { group: string; name: string; prompts: { when: string; text: string }[] }[];
+      assert.deepEqual(histories.map((item) => item.prompts.length), [0, 3, 1, 0, 1, 2, 0, 0, 1, 0, 2]);
+      histories.forEach((item, index) => {
+        assert.deepEqual([item.group, item.name], [EXPECTED_TESTS[index]?.group, EXPECTED_TESTS[index]?.name]);
+        item.prompts.forEach((entry) => {
+          assert.equal(entry.when, '2026/11/15 09:35');
+          assert.notEqual(entry.text, EXPECTED_TESTS[index]?.prompt);
+        });
+      });
+      assert.equal(histories[1]?.prompts[1]?.text, 'add a test of the dsl - multiple classes are allowedd, separated by an empty line\npartial classes (the class name only) are also allowed.');
+      const uniqueKeys: Set<string> = new Set<string>(actualTests.map((item) => `${item.group}.${item.name}`));
       assert.equal(actualTests.length, EXPECTED_TESTS.length);
       assert.equal(uniqueKeys.size, actualTests.length);
     } finally {

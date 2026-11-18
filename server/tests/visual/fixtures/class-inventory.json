@@ -1,0 +1,378 @@
+[
+    {
+        "name": "ClassDetails",
+        "relations": [
+            {
+                "kind": "UNK",
+                "name": "methods",
+                "target": "ClassMember",
+                "many": true
+            }
+        ],
+        "methods": [
+            {
+                "name": "name",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "methods",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "ClassMember[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "relations",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "{ kind: 'OWNS' | 'REF' | 'UNK'; name: string; target: string; // UNTRUST-ALLOW-BOOLEAN: The existing class-details contract encodes relation multiplicity as a boolean; its established wire shape must be retained. many: boolean }[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "isPartial",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "boolean"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "ClassMember",
+        "relations": [
+            {
+                "kind": "UNK",
+                "name": "overloads",
+                "target": "ArgsListT",
+                "many": true
+            }
+        ],
+        "methods": [
+            {
+                "name": "name",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "overloads",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "ArgsListT[]"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "ClassRepository",
+        "relations": [],
+        "methods": [
+            {
+                "name": "getDetails",
+                "overloads": [
+                    [
+                        {
+                            "arg": "names",
+                            "t": "readonly string[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "getClasses",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateClasses",
+                "overloads": [
+                    [
+                        {
+                            "arg": "classes",
+                            "t": "readonly ClassDetails[]"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "DuplicateClassError",
+        "relations": [],
+        "methods": []
+    },
+    {
+        "name": "FieldType",
+        "relations": [
+            {
+                "kind": "UNK",
+                "name": "t",
+                "target": "CompositeTypeT",
+                "many": false
+            }
+        ],
+        "methods": [
+            {
+                "name": "arg",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "t",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "CompositeTypeT"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "FirestoreClassRepository",
+        "relations": [],
+        "methods": [
+            {
+                "name": "getDetails",
+                "overloads": [
+                    [
+                        {
+                            "arg": "names",
+                            "t": "readonly string[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "getClasses",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateClasses",
+                "overloads": [
+                    [
+                        {
+                            "arg": "classes",
+                            "t": "readonly ClassDetails[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "getTests",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateTests",
+                "overloads": [
+                    [
+                        {
+                            "arg": "tests",
+                            "t": "readonly TestDetails[]"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "JsonMap",
+        "relations": [],
+        "methods": [
+            {
+                "name": "fromJson",
+                "overloads": [
+                    [
+                        {
+                            "arg": "input",
+                            "t": "unknown"
+                        },
+                        {
+                            "arg": "parseKey",
+                            "t": "(key: string) => TKey"
+                        },
+                        {
+                            "arg": "parseValue",
+                            "t": "(value: unknown) => TValue"
+                        },
+                        {
+                            "arg": "onInvalidInput",
+                            "t": "(error: Error) => never"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "toJSON",
+                "overloads": [
+                    []
+                ]
+            }
+        ]
+    },
+    {
+        "name": "MemoryClassRepository",
+        "relations": [],
+        "methods": [
+            {
+                "name": "getDetails",
+                "overloads": [
+                    [
+                        {
+                            "arg": "names",
+                            "t": "readonly string[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "getClasses",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateClasses",
+                "overloads": [
+                    [
+                        {
+                            "arg": "classes",
+                            "t": "readonly ClassDetails[]"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "getTests",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateTests",
+                "overloads": [
+                    [
+                        {
+                            "arg": "tests",
+                            "t": "readonly TestDetails[]"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "TestDetails",
+        "relations": [],
+        "methods": [
+            {
+                "name": "group",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "name",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "description",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            },
+            {
+                "name": "prompt",
+                "overloads": [
+                    [
+                        {
+                            "arg": "+RW",
+                            "t": "string"
+                        }
+                    ]
+                ]
+            }
+        ]
+    },
+    {
+        "name": "TestInventoryRepository",
+        "relations": [],
+        "methods": [
+            {
+                "name": "getTests",
+                "overloads": [
+                    []
+                ]
+            },
+            {
+                "name": "updateTests",
+                "overloads": [
+                    [
+                        {
+                            "arg": "tests",
+                            "t": "readonly TestDetails[]"
+                        }
+                    ]
+                ]
+            }
+        ]
+    }
+]

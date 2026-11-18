@@ -4,12 +4,21 @@ import { page } from "../../test-support.js";
 
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "displays persisted tests as a grouped tree without an editor",
   prompt: {
     availability: "available",
-    text: "Add a Tests mode whose left pane displays test groups and cases from the persisted tests inventory, without a text editor.",
+    old: "Add a Tests mode whose left pane displays test groups and cases from the persisted tests inventory, without a text editor.",
+  
+    history: [],
   },
 };
 

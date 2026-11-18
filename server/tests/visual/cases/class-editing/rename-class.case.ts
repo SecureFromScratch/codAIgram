@@ -3,12 +3,23 @@ import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "updates the class box when its title changes",
   prompt: {
     availability: "available",
-    text: "Changing a class title reflects in its class box.",
+    old: "Changing a class title reflects in its class box.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "more tests:\n\n- removing a method line removes it from the method area in the classbox.\n- adding a method adds it to the method area.\n- syntax error wavy-red-underline appears for invalid method syntax\n- changing name of method reflects in classbox\n- changing method args - name, type, amount - reflects in tooltip\n- changing class title reflects in classbox" },
+    ],
   },
 };
 export function registerRenameClassCase(): void {
@@ -18,8 +29,7 @@ export function registerRenameClassCase(): void {
     await editor.fill(text.replace(/^ClassDiagram/, "NewDiagram"));
     await page.waitForFunction(
       () =>
-        document.querySelector(".joint-type-standard-headeredrectangle text")
-          ?.textContent === "NewDiagram",
+        document.querySelector('[data-class-name="NewDiagram"]') !== null,
     );
   });
 }

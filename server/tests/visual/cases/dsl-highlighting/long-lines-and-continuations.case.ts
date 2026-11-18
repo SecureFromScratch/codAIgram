@@ -3,13 +3,24 @@ import { test } from "node:test";
 import { page } from "../../test-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "keeps long editor lines unwrapped and accepts indented multiline methods",
   prompt: {
     availability: "available",
-    text: "Newlines do not change the DSL meaning; method continuation lines need at least four spaces and source lines never wrap.",
+    old: "Newlines do not change the DSL meaning; method continuation lines need at least four spaces and source lines never wrap.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "text editor: start without empty new line separators, but newlines are allowed and do not change meaning. empty space in general is allowed, but methods must be indented 2 spaces and there should be no line wrap. instead - methods can be split between lines like in java/python but indent of continuation lines must be at least 4 spaces." },
+    ],
   },
 };
 export function registerLongLinesAndContinuationsCase(): void {
@@ -26,7 +37,7 @@ export function registerLongLinesAndContinuationsCase(): void {
           ?.textContent?.includes("up to date") === true,
     );
     const method: import("playwright").Locator = page
-      .locator(".joint-type-standard-headeredrectangle [data-method-tooltip]")
+      .locator('[data-class-name="Diagram"] [data-method-tooltip]')
       .first();
     await method.waitFor();
     assert.equal(

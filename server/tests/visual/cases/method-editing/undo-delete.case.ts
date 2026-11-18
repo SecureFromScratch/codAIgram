@@ -5,13 +5,24 @@ import { resetOwnershipEditor } from "../../support/editor-support.js";
 import { waitForMethodNames } from "../../support/method-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "restores a selected and deleted method with undo in its original graph position",
   prompt: {
     availability: "available",
-    text: "Delete the first method using selection and Backspace, then Ctrl+Z; verify editor text, method order, and its full tooltip signature are restored.",
+    old: "Delete the first method using selection and Backspace, then Ctrl+Z; verify editor text, method order, and its full tooltip signature are restored.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "add test: in the text area - remove the first method by selecting it and clicking backspace. then undo using ctrl-z." },
+    ],
   },
 };
 export function registerUndoDeleteMethodCase(): void {
@@ -33,7 +44,7 @@ export function registerUndoDeleteMethodCase(): void {
       "  addClass(name: string, publicMethods: string[])",
     );
     await page.keyboard.press("Backspace");
-    await waitForMethodNames([
+    await waitForMethodNames("ClassDiagram", [
       "addPartialClass",
       "connectClasses",
       "recalcLayout",
@@ -46,18 +57,18 @@ export function registerUndoDeleteMethodCase(): void {
           .join("\n") === expected,
       text,
     );
-    await waitForMethodNames([
+    await waitForMethodNames("ClassDiagram", [
       "addClass",
       "addPartialClass",
       "connectClasses",
       "recalcLayout",
     ]);
     const restored: import("playwright").Locator = page.locator(
-      '.joint-type-standard-headeredrectangle [data-method-index="0"]',
+      '[data-class-name="ClassDiagram"] [data-method-index="0"]',
     );
     assert.equal(
       await restored.getAttribute("data-method-tooltip"),
-      "addClass(name, publicMethods)\n-name: string\n-publicMethods: string[]",
+      "addClass(name, publicMethods)\n-name: string\n-publicMethods: ✏️string[]",
     );
     await restored.hover();
     const tooltip: import("playwright").Locator = page.getByRole("tooltip");
@@ -70,7 +81,7 @@ export function registerUndoDeleteMethodCase(): void {
       const __partValues: readonly string[] = [
         "addClass(name, publicMethods)",
         "name: string",
-        "publicMethods: string[]",
+        "publicMethods: ✏️string[]",
       ];
       for (
         let __partIndex: number = 0;

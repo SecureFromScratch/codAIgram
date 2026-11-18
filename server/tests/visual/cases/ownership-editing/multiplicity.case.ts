@@ -7,13 +7,24 @@ import {
 } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "toggles the many marker when an owned type changes between singular and array",
   prompt: {
     availability: "available",
-    text: "Changing Class[] to Class removes the relationship arity star, and changing it back restores the star.",
+    old: "Changing Class[] to Class removes the relationship arity star, and changing it back restores the star.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "let's start updating dynamically from text to graph.\nadd a test - if OWNS keyword is removed/mangled - the line connecting to Class classbox is removed, classes:Class[] should be wavy-red-underlines to show syntax error.\nIf the OWNS keyword is retyped correctly - the line returns.\nAnother test: the Class[] type for classes is modified to Class (singular) - the arity of the line (*) is removed. also test for the other direction - singular to any-arity." },
+    ],
   },
 };
 export function registerOwnershipMultiplicityCase(): void {

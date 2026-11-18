@@ -1,17 +1,26 @@
 import assert from "node:assert/strict";
-import { loggedFetch } from "../../../dist/utils.js";
+import { loggedFetch } from "../../../dist/server_utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
 import { MemoryClassRepository } from "../../../dist/memory-class-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; reason: string; };
+  prompt: {
+    availability: string;
+    reason: string;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "rejects an oversize update",
   prompt: {
     availability: "unavailable",
     reason: "Migrated existing coverage.",
+  
+    history: [],
   },
 };
 export function registerOversizeUpdateCase(): void {
@@ -34,7 +43,7 @@ export function registerOversizeUpdateCase(): void {
               name: "TooLarge",
               methods: ["a".repeat(270000)],
               relations: [],
-              isPartial: false,
+              
             },
           ]),
         },

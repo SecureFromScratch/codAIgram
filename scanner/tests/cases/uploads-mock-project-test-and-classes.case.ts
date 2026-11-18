@@ -7,13 +7,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../../../server/dist/app.js';
 import { MemoryClassRepository } from '../../../server/dist/memory-class-repository.js';
-import { loggedFetch } from '../../dist/utils.js';
+import { loggedFetch } from '../../dist/scanner_utils.js';
 
 export const TEST_CASE_METADATA = {
   title: 'scans and uploads tests and classes when both types are requested',
   prompt: {
     availability: 'available',
-    text: 'Add a Scanner test proving that --types test,class scans and uploads both the test inventory and class declarations.'
+    old: 'Add a Scanner test proving that --types test,class scans and uploads both the test inventory and class declarations.'
+  ,
+    history: [
+      { when: "2026/11/15 09:35", text: "add a test to the scanner project check if a scan where both test and class types are specified actually scans both" },
+    ],
   }
 };
 
@@ -27,8 +31,8 @@ type ClassDetailsItemT = {
 };
 
 function executeScanner(serverUrl: string): Promise<string> {
-  const scannerPath: string = path.resolve('dist/index.js');
-  const fixturePath: string = path.resolve('mock-testproject');
+  const scannerPath: string = path.resolve('scanner/dist/index.js');
+  const fixturePath: string = path.resolve('scanner/mock-testproject');
   const logDirectory: string = mkdtempSync(path.join(os.tmpdir(), 'codaigram-scanner-combined-upload-'));
   const logPath: string = path.join(logDirectory, 'scanner.log');
   return new Promise<string>((resolve, reject) => {

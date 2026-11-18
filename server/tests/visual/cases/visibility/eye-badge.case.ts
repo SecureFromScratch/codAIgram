@@ -4,13 +4,24 @@ import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "renders a filled circular eye badge at the top left of editor-visible classes",
   prompt: {
     availability: "available",
-    text: "Classes currently displayed in the text area have an open-eye emoji badge at the top left, within a small filled circle.",
+    old: "Classes currently displayed in the text area have an open-eye emoji badge at the top left, within a small filled circle.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "add a test: classes currently displayed in the text area have an open-eye emoji at the top left corner, as a badge (the eye emoji is within a small filled circle)." },
+    ],
   },
 };
 export function registerEyeBadgeCase(): void {

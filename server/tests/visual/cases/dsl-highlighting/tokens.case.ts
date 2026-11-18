@@ -3,20 +3,44 @@ import { test } from "node:test";
 import { page } from "../../test-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "highlights class, methods, parameter types, and ownership while editing",
   prompt: {
     availability: "available",
-    text: "Define a DSL and syntax highlighting for class declarations, methods, parameters, types, and OWNS declarations.",
+    old: "Define a DSL and syntax highlighting for class declarations, methods, parameters, types, and OWNS declarations.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "define a dsl for the textual representation of the class diagrams.\nadd syntax highlighting for class name line (bold+italic+underline), method name + params in ts syntax highlighting, OWNS in italic+underline with arg name and type in ts syntax highlighting style" },
+      { when: "2026/11/15 09:35", text: "changes OWNS highlighting - black color, bold, no underline or italics.\nadd italics to argument types" },
+      { when: "2026/11/15 09:35", text: "in dsl syntax highlighting - let's swap the italics to be on arg names instead of arg types." },
+    ],
   },
 };
 export function registerDslTokensCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const editor: import("playwright").Locator = page.getByRole("textbox", { name: "Diagram text", });
-    const heading: import("playwright").Locator =
-      editor.locator(".dsl-class-name");
+    await page.evaluate(() => {
+      const app: { selectClass: (name: string) => void } | undefined =
+        (window as Window & { __app?: { selectClass: (name: string) => void } }).__app;
+      if (!app) throw new Error("Application command hook is unavailable.");
+      app.selectClass("ClassDiagram");
+    });
+    await page.waitForFunction(
+      () => document.querySelector(".cm-content .cm-line")?.textContent === "ClassDiagram",
+    );
+    const heading: import("playwright").Locator = editor
+      .locator(".cm-line")
+      .first()
+      .locator(".dsl-class-name");
     assert.equal(await heading.innerText(), "ClassDiagram");
     const headingStyle: {
       readonly weight: string;
@@ -99,7 +123,7 @@ export function registerDslTokensCase(): void {
       "Diagram\n  add(\n    value: Map<string, number>\n    )\nOWNS things: Thing[]";
     await editor.fill(updated);
     assert.equal(
-      await editor.locator(".dsl-class-name").innerText(),
+      await editor.locator(".cm-line").first().locator(".dsl-class-name").innerText(),
       "Diagram",
     );
     assert.equal(await editor.locator(".dsl-method-name").innerText(), "add");

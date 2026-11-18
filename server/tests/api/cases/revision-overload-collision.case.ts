@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
+import { MemoryClassRepository } from '../../../dist/memory-class-repository.js';
+import { parseStoredClassRevision, parseStoredClassSnapshot } from '../../../dist/class-storage-schema.js';
+import type { ClassRevision, ClassUpdate } from '../../../dist/class-revision.js';
+import { INITIAL, SCAN, USER } from '../support/class-revision-support.js';
+import type { TestCaseMetadata } from '../../test-case-metadata.js';
+
+export const TEST_CASE_METADATA: TestCaseMetadata = {
+  title: "rejects renaming an overload onto an existing signature",
+  prompt: {
+    availability: 'available',
+    old: "Track class changes and deletions under one originator per complete update.",
+    history: [
+      { when: "2026/11/15 09:35", text: "calling updateClasses is with a SINGLE originatoor type, name, version tag (usually a timestamp).\nall changes in that updated are attributed to them - including the deletion.\nin fact - a good storage structure will hold the current state in one document type and the history in another, where history only has the originators name etc once. this is a bit like git - current version on top and deltas going back" },
+    ],
+  },
+};
+
+export function registerRevisionOverloadCollisionCase(): void {
+  it(TEST_CASE_METADATA.title, () => {
+    const initial: ClassUpdate = {
+      name: 'Notebook',
+      methods: [{
+        name: 'find',
+        overloads: [
+          { args: [{ arg: 'key', t: 'string' }] },
+          { args: [{ arg: 'index', t: 'number' }] },
+        ],
+      }],
+      relations: [],
+      
+    };
+    const current = reviseClass(initial, undefined, SCAN);
+    const conflicting: ClassUpdate = {
+      name: 'Notebook',
+      methods: [{
+        name: 'find',
+        overloads: [{
+          args: [{ arg: 'index', t: 'number' }],
+          modifies: 'key: string'
+        }],
+      }],
+      relations: [],
+      
+    };
+    assert.throws(() => reviseClass(conflicting, current.current, USER), /already exists/);
+  });
+}

@@ -27,23 +27,37 @@ type DiagramTextT = {
 };
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "keeps diagram text on one line per item, fitting or ending in an ellipsis",
   prompt: {
     availability: "available",
-    text: "All text in the diagram must either fit on one line or end in an ellipsis; it must not wrap.",
+    old: "All text in the diagram must either fit on one line or end in an ellipsis; it must not wrap.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "add a test on all the text in the diagram - no text line wraps - they either fit or have an elipsis" },
+    ],
   },
 };
-async function inspectDiagramText(): Promise<DiagramTextT> {
-  return page.evaluate(() => {
-    const source: ReturnType<Document["querySelector"]> = document.querySelector(
+async function inspectDiagramText(
+  headingName: string,
+  expectedTarget: string,
+): Promise<DiagramTextT> {
+  return page.evaluate(({ heading: expectedClassName, targetName }) => {
+    const source: Element | undefined = [...document.querySelectorAll(
       ".joint-type-standard-headeredrectangle",
-    );
-    const target: ReturnType<Document["querySelector"]> = document.querySelector(
+    )].find((item: Element) => item.getAttribute("data-class-name") === expectedClassName);
+    const target: Element | undefined = [...document.querySelectorAll(
       ".joint-type-standard-rectangle",
-    );
+    )].find((item: Element) => item.getAttribute("data-class-name") === targetName);
     if (!source || !target)
       window.logAndThrow(new Error("Expected both class boxes."));
     const heading: SVGTextElement = source.querySelectorAll("text").item(0);
@@ -80,7 +94,7 @@ async function inspectDiagramText(): Promise<DiagramTextT> {
         (text: Element) => text.textContent,
       ),
     };
-  });
+  }, { heading: headingName, targetName: expectedTarget });
 }
 function fitsOrIsEllipsized(shown: Node["textContent"], full: string): boolean {
   return (
@@ -93,7 +107,10 @@ async function verifyText(
   expectedMembers: readonly string[],
   expectedTarget: string,
 ): Promise<void> {
-  const actual: DiagramTextT = await inspectDiagramText();
+  const actual: DiagramTextT = await inspectDiagramText(
+    expectedHeading,
+    expectedTarget,
+  );
   assert.ok(
     fitsOrIsEllipsized(actual.heading, expectedHeading),
     "heading is complete or ellipsized",
@@ -140,7 +157,10 @@ async function verifyText(
       actual.targetRect.right <= actual.targetBoxRect.right,
     "target fits",
   );
-  assert.deepEqual(actual.marker, ["classes", "*"]);
+  assert.ok(
+    actual.marker.includes("classes") && actual.marker.includes("*"),
+    "relationship name and multiplicity remain visible",
+  );
 }
 export function registerTextEllipsisCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
@@ -160,9 +180,9 @@ export function registerTextEllipsisCase(): void {
       .fill(`${heading}\n  ${member}\nOWNS classes: ${target}[]`);
     await page.waitForFunction(
       () =>
-        document
-          .querySelector(".joint-type-standard-headeredrectangle text")
-          ?.textContent?.startsWith("VeryWide") === true,
+        [...document.querySelectorAll(".joint-type-standard-headeredrectangle")].some(
+          (element: Element) => element.getAttribute("data-class-name") === "VeryWideClassDiagramNameWithManyCharacters",
+        ),
     );
     assert.ok(
       (

@@ -4,19 +4,33 @@ import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "allows new and referenced partial classes to be defined and edited",
   prompt: {
     availability: "available",
-    text: "A new class name and a partial class referenced as a property, method argument, or OWNS type are valid declarations and can later be completed.",
+    old: "A new class name and a partial class referenced as a property, method argument, or OWNS type are valid declarations and can later be completed.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "test: in the editor - if the name of a new class is written - it is ok (no error). if the name of a partial class mentioned by another class in the editor (either as a property type, method arg or references, such as OWNS) - it is ok, and changing it (i.e. by adding methods) changes that class." },
+    ],
   },
 };
 export function registerReferencedPartialClassesCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
-    const references: string = `${text}\n  property: PropertyType\n  use(value: ArgumentType)\nOWNS owned: OwnedType[]`;
+    const references: string = `${text.replace(
+      "OWNS classes: Class[]",
+      "  property: PropertyType\n  use(value: ArgumentType)\nOWNS classes: Class[]",
+    )}\nOWNS owned: OwnedType[]`;
     {
       const __nameValues: readonly string[] = [
         "FreshClass",

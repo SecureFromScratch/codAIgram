@@ -6,7 +6,11 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'parses OWNS, REF, and UNK class connections',
   prompt: {
     availability: 'available',
-    text: 'Support OWNS, REF, and UNK relationship keywords with single and many arities, unnamed references, and incomplete targets.'
+    old: 'Support OWNS, REF, and UNK relationship keywords with single and many arities, unnamed references, and incomplete targets.'
+  ,
+    history: [
+      { when: "2026/11/15 09:35", text: "in server api test - expand classesDetails/updateClasses test to test for the following connection type between classes:\nOWNS\nREF\nUNK\nalso expand these tests to code editor in classes editing page. and the supported dsl." },
+    ],
   }
 };
 

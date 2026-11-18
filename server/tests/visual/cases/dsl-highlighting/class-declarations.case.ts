@@ -3,12 +3,23 @@ import { test } from "node:test";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "styles every class declaration in the editor",
   prompt: {
     availability: "available",
-    text: "Find every class name in the text editor and verify its color, bold, italic, and underline styles.",
+    old: "Find every class name in the text editor and verify its color, bold, italic, and underline styles.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "write a test for the text editor:\nfind all class names. for each one verify the style (color, bold, italic, underline) is correct" },
+    ],
   },
 };
 export function registerClassDeclarationHighlightingCase(): void {

@@ -4,13 +4,24 @@ import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "reports a hidden existing class conflict until @ restores its saved definition",
   prompt: {
     availability: "available",
-    text: "Starting a class using an existing name is a conflict; adding @ removes it and restores the existing class definition for editing.",
+    old: "Starting a class using an existing name is a conflict; adding @ removes it and restores the existing class definition for editing.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "final test: starting a class in the text editor with the name of an existing class is a conflict error (wavy-red-underline), but if that class name is then followed by a @ then the @ is removed and the contents of the appropriate existing class is copied into the editor (the @ signifies we want to edit an existing class)." },
+    ],
   },
 };
 export function registerRestoreExistingClassCase(): void {

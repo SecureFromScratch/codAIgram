@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loggedFetch } from "../../../dist/utils.js";
+import { loggedFetch } from "../../../dist/server_utils.js";
 import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -12,12 +12,21 @@ import { INITIAL_CLASSES } from "../../../dist/memory-class-repository.js";
 import type { ClassDetails } from "../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; reason: string; };
+  prompt: {
+    availability: string;
+    reason: string;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "persists a batch which the details route reads",
   prompt: {
     availability: "unavailable",
     reason: "Migrated existing Firestore integration coverage.",
+  
+    history: [],
   },
 };
 export function registerPersistAndReadCase(): void {
@@ -28,7 +37,7 @@ export function registerPersistAndReadCase(): void {
       name: "IntegrationAdded",
       methods: [{ name: "save", overloads: [[{ arg: "value", t: "string" }]] }],
       relations: [],
-      isPartial: false,
+      
     };
     try {
       {
@@ -60,12 +69,23 @@ export function registerPersistAndReadCase(): void {
           name: "Class",
           methods: [{ name: "inspect", overloads: [[]] }],
           relations: [],
-          isPartial: false,
+          
         };
         const update: Response = await loggedFetch(`${base}/updateClasses`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify([added, changed]),
+          body: JSON.stringify({
+            origin: { kind: 'user', name: 'firestore-test', version: 'v1' },
+            classes: [added, changed].map((item: ClassDetails) => ({
+              name: item.name,
+              methods: item.methods.map((member) => ({
+                name: member.name,
+                overloads: member.overloads.map((args) => ({ args })),
+              })),
+              relations: item.relations,
+              ...(item.state ? { state: item.state } : {}),
+            })),
+          }),
         });
         assert.equal(update.status, 200);
         const read: Response = await loggedFetch(`${base}/classesDetails`, {

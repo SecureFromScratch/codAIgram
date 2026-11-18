@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'converts structured methods, public fields, and accessors to DSL lines',
   prompt: {
     availability: 'available',
-    text: 'Represent method arguments and member kinds as FieldType values, including their composable types, and render fields without parentheses.'
+    old: 'Represent method arguments and member kinds as FieldType values, including their composable types, and render fields without parentheses.'
+  ,
+    history: [],
   }
 };
 
@@ -33,8 +35,7 @@ const DETAILS: ClassDetails = {
     }
   ],
   relations: [],
-  isPartial: false
-};
+  };
 
 export function registerStructuredMembersCase(): void {
   it(TEST_CASE_METADATA.title, () => {

@@ -5,37 +5,119 @@ import { chromium, type Browser, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
 import { createApp } from "../../dist/app.js";
 import { MemoryClassRepository } from "../../dist/memory-class-repository.js";
+import type { ClassDetails, ClassRepository, DatabaseClassChange, TestInventoryRepository } from "../../dist/memory-repository.js";
 import { initializeVisualLog, logVisualEvent } from "./logging.js";
 let browser: Browser | undefined;
 let server: ViteDevServer | undefined;
 let api: ReturnType<ReturnType<typeof createApp>["listen"]> | undefined;
+let repository: MemoryClassRepository = new MemoryClassRepository();
 export let page: Page;
+
+export const VISUAL_CLASSES: readonly ClassDetails[] = [
+  {
+    name: "ClassDiagram",
+    methods: [
+      {
+        name: "addClass",
+        overloads: [[{ arg: "name", t: "string" }, { arg: "publicMethods", t: "string[]" }]] },
+      {
+        name: "addPartialClass",
+        overloads: [[{ arg: "name", t: "string" }]] },
+      {
+        name: "connectClasses",
+        overloads: [[
+        { arg: "from", t: "string" },
+        { arg: "to", t: "string" },
+        { arg: "connectionType", t: "ConnectionType" },
+        { arg: "arity", t: "integer" },
+      ]] },
+      { name: "recalcLayout", overloads: [[]] },
+    ],
+    relations: [{
+      kind: "OWNS",
+      name: "classes",
+      target: "Class",
+      many: true }],
+    
+  },
+  {
+    name: "Class",
+    methods: [],
+    relations: [],
+    state: 'partial' },
+];
+
+class VisualMemoryRepository extends MemoryClassRepository {
+  readonly #classOrder: readonly string[];
+  readonly #lastChange: DatabaseClassChange | undefined;
+
+  constructor(classes: readonly ClassDetails[], lastChange?: DatabaseClassChange) {
+    super(classes);
+    this.#classOrder = classes.map((item: ClassDetails) => item.name);
+    this.#lastChange = lastChange;
+  }
+
+  override async getClasses(): Promise<ClassDetails[]> {
+    const classes: ClassDetails[] = await super.getClasses();
+    return classes.sort((left: ClassDetails, right: ClassDetails) => this.#classOrder.indexOf(left.name) - this.#classOrder.indexOf(right.name));
+  }
+
+  override async getLastClassChange(): Promise<DatabaseClassChange | undefined> {
+    return this.#lastChange;
+  }
+}
+
+export async function setVisualClasses(classes: readonly ClassDetails[], lastChange?: DatabaseClassChange): Promise<void> {
+  repository = new VisualMemoryRepository(classes, lastChange);
+  await repository.updateTests([
+    {
+      group: "diagram",
+      name: "renders-class",
+      description: "renders a class diagram",
+      prompt: "Render a class diagram." },
+    {
+      group: "repository",
+      name: "stores-details",
+      description: "stores class details",
+      prompt: "Store class details." },
+  ]);
+}
+
+const visualRepository: ClassRepository & TestInventoryRepository = {
+  getDetails: (names) => repository.getDetails(names),
+  getClasses: () => repository.getClasses(),
+  updateClasses: (classes) => repository.updateClasses(classes),
+  getClassSnapshots: () => repository.getClassSnapshots(),
+  getClassHistory: (names) => repository.getClassHistory(names),
+  getRevisionIds: (howFarBack) => repository.getRevisionIds(howFarBack),
+  getLastClassChange: () => repository.getLastClassChange(),
+  updateClassSnapshots: (classes, origin) => repository.updateClassSnapshots(classes, origin),
+  getTests: () => repository.getTests(),
+  getHistory: (identifiers) => repository.getHistory(identifiers),
+  updateTests: (tests) => repository.updateTests(tests),
+};
+
+export const VISUAL_FIXTURE_METADATA = {
+  prompt: {
+    history: [
+      { when: "2026/11/15 09:35", text: "for the current test suite use this definition of ClassDiagvram:\nClassDiagram\n  addClass(name: string, publicMethods: string[])\n  addPartialClass(name: string)\n  connectClasses(from: string, to: string, connectionType: ConnectionType, arity: integer)\n  recalcLayout()\nOWNS classes: Class[]\n\nalso - Class is a partial class.\n\nall tests should be agains the in-memory storage so we control the content." },
+    ],
+  },
+};
+
 export function registerVisualLifecycle(): void {
   before(async () => {
     initializeVisualLog();
     logVisualEvent("INFO", "Starting visual test suite");
-    const repository: MemoryClassRepository = new MemoryClassRepository();
-    await repository.updateTests([
-      {
-        group: "diagram",
-        name: "renders-class",
-        description: "renders a class diagram",
-        prompt: "Render a class diagram.",
-      },
-      {
-        group: "repository",
-        name: "stores-details",
-        description: "stores class details",
-        prompt: "Store class details.",
-      },
-    ]);
-    api = createApp(repository).listen(0, "127.0.0.1");
+    await setVisualClasses(VISUAL_CLASSES);
+    api = createApp(visualRepository).listen(0, "127.0.0.1");
     await new Promise<void>((resolve) => api?.once("listening", resolve));
     const apiAddress: ReturnType<NonNullable<typeof api>["address"]> =
       api.address();
     assert.ok(apiAddress && typeof apiAddress !== "string");
     server = await createServer({
       configFile: "client/vite.config.ts",
+      configLoader: "runner",
       server: {
         host: "127.0.0.1",
         port: 41731,
@@ -54,12 +136,14 @@ export function registerVisualLifecycle(): void {
     page.on("pageerror", (error: Error) => logVisualEvent("ERROR", error.stack ?? error.message));
     page.setDefaultTimeout(5000);
     await page.goto(`http://127.0.0.1:${String(address.port)}/`);
-    await page.locator(".canvas svg").first().waitFor({ timeout: 10000 });
+    await page.locator(".canvas").first().waitFor({ timeout: 10000 });
   });
   beforeEach(async (context) => {
     logVisualEvent("INFO", `Starting test: ${context.name}`);
+    await page.evaluate(() => window.localStorage.removeItem("codaigram.editorPercent"));
+    await setVisualClasses(VISUAL_CLASSES);
     await page.reload();
-    await page.locator(".canvas svg").first().waitFor({ timeout: 10000 });
+    await page.locator(".canvas").first().waitFor({ timeout: 10000 });
   });
   after(async () => {
     logVisualEvent("INFO", "Closing visual test suite");

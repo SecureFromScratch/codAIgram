@@ -4,13 +4,22 @@ import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "retains in-memory classes after the editor is emptied and reopens them",
   prompt: {
     availability: "available",
-    text: "Changing the editor does not erase the in-memory representation; an empty editor keeps the graph and lets classes reopen.",
+    old: "Changing the editor does not erase the in-memory representation; an empty editor keeps the graph and lets classes reopen.",
+  
+    history: [],
   },
 };
 export function registerEmptyEditorCase(): void {
@@ -23,7 +32,7 @@ export function registerEmptyEditorCase(): void {
       await page.locator(".joint-type-standard-headeredrectangle").count(),
       1,
     );
-    await page.locator(".joint-type-standard-headeredrectangle").click();
+    await page.locator('[data-class-name="ClassDiagram"]').click();
     await page.waitForFunction(
       (expected: string) =>
         [...document.querySelectorAll(".cm-content .cm-line")]

@@ -17,13 +17,16 @@ export type DiagramInspectionT = {
   readonly inHeader: readonly Node["textContent"][];
   readonly target: BoundsT;
 };
-export async function inspectDiagram(): Promise<DiagramInspectionT> {
-  return page.evaluate(() => {
+export async function inspectDiagram(
+  sourceClassName: string,
+  targetClassName: string,
+): Promise<DiagramInspectionT> {
+  return page.evaluate(({ sourceName, targetName }) => {
     const source: ReturnType<Document["querySelector"]> = document.querySelector(
-      ".joint-type-standard-headeredrectangle",
+      `[data-class-name="${sourceName}"]`,
     );
     const target: ReturnType<Document["querySelector"]> = document.querySelector(
-      ".joint-type-standard-rectangle",
+      `[data-class-name="${targetName}"]`,
     );
     if (!source || !target)
       window.logAndThrow(new Error("Expected both class boxes."));
@@ -102,5 +105,5 @@ export async function inspectDiagram(): Promise<DiagramInspectionT> {
       inHeader,
       target: bounds(targetRectangle),
     };
-  });
+  }, { sourceName: sourceClassName, targetName: targetClassName });
 }

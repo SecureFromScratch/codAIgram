@@ -7,12 +7,23 @@ import {
 } from "../../support/method-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "marks invalid method syntax and retains the last valid graph",
   prompt: {
     availability: "available",
-    text: "A syntax error wavy-red-underlines invalid method syntax while preserving the prior valid class-box methods.",
+    old: "A syntax error wavy-red-underlines invalid method syntax while preserving the prior valid class-box methods.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "more tests:\n\n- removing a method line removes it from the method area in the classbox.\n- adding a method adds it to the method area.\n- syntax error wavy-red-underline appears for invalid method syntax" },
+    ],
   },
 };
 export function registerInvalidMethodCase(): void {
@@ -26,7 +37,7 @@ export function registerInvalidMethodCase(): void {
       ),
     );
     await assertRedWavyError(editor, "addClass(name string)");
-    await waitForMethodNames([
+    await waitForMethodNames("ClassDiagram", [
       "addClass",
       "addPartialClass",
       "connectClasses",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loggedFetch } from "../../../dist/utils.js";
+import { loggedFetch } from "../../../dist/server_utils.js";
 import type { Server } from "node:net";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -11,12 +11,21 @@ import {
 import { INITIAL_CLASSES } from "../../../dist/memory-class-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; reason: string; };
+  prompt: {
+    availability: string;
+    reason: string;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "preserves requested order and duplicates",
   prompt: {
     availability: "unavailable",
     reason: "Migrated existing Firestore integration coverage.",
+  
+    history: [],
   },
 };
 export function registerRequestedOrderCase(): void {

@@ -6,7 +6,11 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'parses single, many, unnamed, and incomplete ownership',
   prompt: {
     availability: 'available',
-    text: 'Test OWNS changes for singular and many arity, missing relation names, and incomplete referenced types.'
+    old: 'Test OWNS changes for singular and many arity, missing relation names, and incomplete referenced types.'
+  ,
+    history: [
+      { when: "2026/11/15 09:35", text: "in server api test - expand classesDetails/updateClasses test to test for the following connection type between classes:\nOWNS\nREF\nUNK\nalso expand these tests to code editor in classes editing page. and the supported dsl." },
+    ],
   }
 };
 

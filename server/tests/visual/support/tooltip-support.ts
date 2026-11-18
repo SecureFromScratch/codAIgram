@@ -10,7 +10,7 @@ export async function checkTooltipAtPanelEdge(
     await canvas.evaluate(
       (element: Element, edgeName: TooltipPanelEdgeT) => {
         const box: ReturnType<Element["querySelector"]> = element.querySelector(
-          ".joint-type-standard-headeredrectangle rect",
+          '[data-class-name="ClassDiagram"]',
         );
         const viewport: DOMRect = element.getBoundingClientRect();
         if (!box) window.logAndThrow(new Error("Expected the ClassDiagram box."));
@@ -31,7 +31,7 @@ export async function checkTooltipAtPanelEdge(
         element: Element,
       ) => {
         const box: ReturnType<Element["querySelector"]> = element.querySelector(
-          ".joint-type-standard-headeredrectangle rect",
+          '[data-class-name="ClassDiagram"]',
         );
         if (!box) window.logAndThrow(new Error("Expected the ClassDiagram box."));
         const rectangle: DOMRect = box.getBoundingClientRect();
@@ -49,7 +49,7 @@ export async function checkTooltipAtPanelEdge(
       `class box is at the ${edge} of the graph panel`,
     );
     await page
-      .locator('.joint-type-standard-headeredrectangle [data-method-index="0"]')
+      .locator('[data-class-name="ClassDiagram"] [data-method-index="0"]')
       .hover();
     const tooltip: import("playwright").Locator = page.getByRole("tooltip");
     await tooltip.waitFor();

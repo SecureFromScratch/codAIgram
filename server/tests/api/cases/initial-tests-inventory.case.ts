@@ -1,17 +1,28 @@
 import assert from "node:assert/strict";
-import { loggedFetch } from "../../../dist/utils.js";
+import { loggedFetch } from "../../../dist/server_utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
 import { MemoryClassRepository } from "../../../dist/memory-class-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "stores an initial tests inventory",
   prompt: {
     availability: "available",
-    text: "Store two tests and return them unchanged.",
+    old: "Store two tests and return them unchanged.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "add an in-memory codaigram test: start with an empty in-memory db. call updateTests route with 2 mock tests info, call getTests route and check that returned tests are the same as initially pushed." },
+    ],
   },
 };
 export function registerInitialTestsInventoryCase(): void {
@@ -52,7 +63,9 @@ export function registerInitialTestsInventoryCase(): void {
       assert.equal(update.status, 200);
       const read: Response = await loggedFetch(`${baseUrl}/getTests`);
       assert.equal(read.status, 200);
-      assert.deepEqual(await read.json(), tests);
+      const entries = await read.json() as { group: string; name: string; description: string; lastChangedAt: string }[];
+      assert.deepEqual(entries.map(({ group, name, description }) => ({ group, name, description })), tests.map(({ group, name, description }) => ({ group, name, description })));
+      entries.forEach((entry) => { assert.ok(!('prompt' in entry)); assert.ok(!Number.isNaN(Date.parse(entry.lastChangedAt))); });
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error?: Error) =>

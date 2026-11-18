@@ -3,12 +3,25 @@ import { test } from "node:test";
 import { page } from "../../test-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "exposes method signatures and parameter types on hover",
   prompt: {
     availability: "available",
-    text: "Class-box method lines show names only, while a styled tooltip presents parameter names, types, and consistent per-parameter colors.",
+    old: "Class-box method lines show names only, while a styled tooltip presents parameter names, types, and consistent per-parameter colors.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "in the class diagram - method's text is NOT displayed as is. instead only the name of parameters is displayed and the type is displayed when hovering over the name (tooltip style)." },
+      { when: "2026/11/15 09:35", text: "graph visual changes:\n1) classbox top bar (with the name) has to much bottom padding - should be a tighter bar vertically.\n2) the partial class \"Class\" classbox only contains its name - which is the right way, but the bg color/styl should be as for the name bar in a regular (with methods) classbox - it's a classbox with no methods textbox area.\n3) for each method line in the classbox method area - only put the method name. tooltip (when hovering) will contain show full method signature, but with param names and not types. instead types will be listed below, i.e.:\n  addClass(name, publicMethods)\n  -name: string\n  -publicMethods: string[]\n4) the OWNS line should not be listed in thevisual\n5) the name of the member variable for the OWNS classes: Class[] should be on the connector to Class\n6) since this is a OWNS relatiobnship the connector needs to start with a filled diamond (uml standard notation for ownership)" },
+      { when: "2026/11/15 09:35", text: "this all looks good - but i want the tooltips to be more stylish - the method line in bold, different color for parantheses, different color per argument which is again used when noting that argument;s type in the lines below." },
+    ],
   },
 };
 export function registerMethodSignaturesCase(): void {
@@ -18,16 +31,15 @@ export function registerMethodSignaturesCase(): void {
     await page.getByRole("textbox", { name: "Diagram text" }).fill(source);
     await page.waitForFunction(
       () =>
-        document.querySelector(".joint-type-standard-headeredrectangle text")
-          ?.textContent === "Diagram",
+        document.querySelector('[data-class-name="Diagram"]') !== null,
     );
     {
       const __entryValues: readonly (
-        | readonly ["f", "f(name, items)\n-name: string\n-items: string[]"]
+        | readonly ["f", "f(name, items)\n-name: string\n-items: ✏️string[]"]
         | readonly ["g", "g(count)\n-count: integer"]
         | readonly ["empty", "empty()"]
       )[] = [
-        ["f", "f(name, items)\n-name: string\n-items: string[]"],
+        ["f", "f(name, items)\n-name: string\n-items: ✏️string[]"],
         ["g", "g(count)\n-count: integer"],
         ["empty", "empty()"],
       ] as const;
@@ -37,11 +49,11 @@ export function registerMethodSignaturesCase(): void {
         __entryIndex += 1
       ) {
         const [name, tooltip]:
-          | readonly ["f", "f(name, items)\n-name: string\n-items: string[]"]
+          | readonly ["f", "f(name, items)\n-name: string\n-items: ✏️string[]"]
           | readonly ["g", "g(count)\n-count: integer"]
           | readonly ["empty", "empty()"] = __entryValues[__entryIndex]!;
         const method: import("playwright").Locator = page.locator(
-          `.joint-type-standard-headeredrectangle [data-method-tooltip^="${name}("]`,
+          `[data-class-name="Diagram"] [data-method-tooltip^="${name}("]`,
         );
         await method.hover();
         assert.equal(await method.getAttribute("data-method-tooltip"), tooltip);
@@ -50,7 +62,7 @@ export function registerMethodSignaturesCase(): void {
       }
     }
     const first: import("playwright").Locator = page.locator(
-      '.joint-type-standard-headeredrectangle [data-method-tooltip^="f("]',
+      '[data-class-name="Diagram"] [data-method-tooltip^="f("]',
     );
     await first.hover();
     const styles: {
@@ -139,11 +151,10 @@ export function registerMethodSignaturesCase(): void {
       .fill(`Palette\n  f(${seven})\nOWNS classes: Class[]`);
     await page.waitForFunction(
       () =>
-        document.querySelector(".joint-type-standard-headeredrectangle text")
-          ?.textContent === "Palette",
+        document.querySelector('[data-class-name="Palette"]') !== null,
     );
     await page
-      .locator('.joint-type-standard-headeredrectangle [data-method-index="0"]')
+      .locator('[data-class-name="Palette"] [data-method-tooltip^="f("]')
       .hover();
     const colors: readonly string[] = await page
       .getByRole("tooltip")

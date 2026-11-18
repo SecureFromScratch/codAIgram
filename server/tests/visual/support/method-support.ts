@@ -2,18 +2,19 @@ import assert from "node:assert/strict";
 import type { Locator } from "playwright";
 import { page } from "../test-support.js";
 export async function waitForMethodNames(
+  className: string,
   names: readonly string[],
 ): Promise<void> {
   await page.waitForFunction(
-    (expected: readonly string[]) =>
+    (input: { readonly className: string; readonly expected: readonly string[] }) =>
       JSON.stringify(
         [
           ...document.querySelectorAll(
-            ".joint-type-standard-headeredrectangle [data-method-index]",
+            `[data-class-name="${input.className}"] [data-method-index]`,
           ),
         ].map((item: Element) => item.textContent),
-      ) === JSON.stringify(expected),
-    names,
+      ) === JSON.stringify(input.expected),
+    { className, expected: names },
   );
 }
 export async function assertRedWavyError(

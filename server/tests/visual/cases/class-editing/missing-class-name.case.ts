@@ -3,12 +3,23 @@ import { test } from "node:test";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "displays a red wavy diagnostic for a missing class name",
   prompt: {
     availability: "available",
-    text: "A missing class name produces a red-wavy underline and a useful diagnostic.",
+    old: "A missing class name produces a red-wavy underline and a useful diagnostic.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "more tests:\n\n- removing a method line removes it from the method area in the classbox.\n- adding a method adds it to the method area.\n- syntax error wavy-red-underline appears for invalid method syntax\n- changing name of method reflects in classbox\n- changing method args - name, type, amount - reflects in tooltip\n- changing class title reflects in classbox\n- wrong indentation produces red-wavy-nuderline\n- missing class name produces red-wavy-underline" },
+    ],
   },
 };
 export function registerMissingClassNameCase(): void {

@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'keeps empty methods and unrecognized members intact',
   prompt: {
     availability: 'available',
-    text: 'Display method names in class boxes while preserving non-method DSL lines without changing their text.'
+    old: 'Display method names in class boxes while preserving non-method DSL lines without changing their text.'
+  ,
+    history: [],
   }
 };
 

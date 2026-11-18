@@ -10,7 +10,9 @@ export const TEST_CASE_METADATA = {
   title: 'logs the exact scanner upload payload, destination and response status',
   prompt: {
     availability: 'available',
-    text: 'Log the attempted fetch URL and payload, including an unsuccessful HTTP response.'
+    old: 'Log the attempted fetch URL and payload, including an unsuccessful HTTP response.'
+  ,
+    history: [],
   }
 };
 
@@ -24,8 +26,8 @@ export function registerScannerHttpLogCase(): void {
       const address: ReturnType<Server['address']> = server.address();
       assert.ok(address && typeof address !== 'string');
       const destination: string = `http://127.0.0.1:${String(address.port)}/api/updateTests`;
-      const cli: string = path.resolve('dist/index.js');
-      const fixture: string = path.resolve('mock-testproject');
+      const cli: string = path.resolve('scanner/dist/index.js');
+      const fixture: string = path.resolve('scanner/mock-testproject');
       const exitCode: number | null = await new Promise((resolve, reject) => {
         const child: ReturnType<typeof spawn> = spawn(process.execPath, [cli, 'fixture', fixture, '--server-url', `http://127.0.0.1:${String(address.port)}`, '--logfile', logPath], { cwd: directory });
         child.stdout?.resume();

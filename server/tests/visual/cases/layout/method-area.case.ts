@@ -3,18 +3,29 @@ import { test } from "node:test";
 import { inspectDiagram } from "../../support/diagram-inspection.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "keeps method text below the header and within class borders",
   prompt: {
     availability: "available",
-    text: "The text box with the methods text does not overflow into the class name area or outside the class borders.",
+    old: "The text box with the methods text does not overflow into the class name area or outside the class borders.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "second test: the text box with the methods text does not overflow into the class name area or outside the class borders." },
+    ],
   },
 };
 export function registerMethodAreaCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const data: Awaited<ReturnType<typeof inspectDiagram>> =
-      await inspectDiagram();
+      await inspectDiagram("ClassDiagram", "Class");
     {
       const __memberValues: readonly string[] = [
         "addClass",

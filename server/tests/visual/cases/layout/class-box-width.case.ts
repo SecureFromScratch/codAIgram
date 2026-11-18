@@ -3,22 +3,33 @@ import { test } from "node:test";
 import { page } from "../../test-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "keeps class boxes within 200 pixels",
   prompt: {
     availability: "available",
-    text: "Add a visual test that class boxes are no wider than 200 pixels.",
+    old: "Add a visual test that class boxes are no wider than 200 pixels.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "third test - class box is no more than 200px wide." },
+    ],
   },
 };
 export function registerClassBoxWidthCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const widths: { readonly source: number; readonly target: number; } = await page.evaluate(() => {
       const source: ReturnType<Document["querySelector"]> = document.querySelector(
-        ".joint-type-standard-headeredrectangle rect",
+        '[data-class-name="ClassDiagram"] rect[joint-selector="body"]',
       );
       const target: ReturnType<Document["querySelector"]> = document.querySelector(
-        ".joint-type-standard-rectangle rect",
+        '[data-class-name="Class"] rect',
       );
       if (!source || !target)
         window.logAndThrow(new Error("Expected class boxes."));

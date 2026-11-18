@@ -3,12 +3,23 @@ import { test } from "node:test";
 import { page } from "../../test-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "keeps the class heading area free of artifacts",
   prompt: {
     availability: "available",
-    text: "Verify that only ClassDiagram appears within its header area.",
+    old: "Verify that only ClassDiagram appears within its header area.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "first test: the generated ClassDiagram box has only the header/name in the area for the name - no other artifiacts." },
+    ],
   },
 };
 export function registerHeadingAreaCase(): void {
@@ -20,7 +31,7 @@ export function registerHeadingAreaCase(): void {
       textBounds: DOMRect;
     } = await page.evaluate(() => {
       const box: ReturnType<Document["querySelector"]> = document.querySelector(
-        ".joint-type-standard-headeredrectangle",
+        '[data-class-name="ClassDiagram"]',
       );
       if (!box) window.logAndThrow(new Error("Expected class box."));
       const header: ReturnType<Element["querySelector"]> = box.querySelector(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loggedFetch } from "../../../dist/utils.js";
+import { loggedFetch } from "../../../dist/server_utils.js";
 import type { Server } from "node:net";
 import { test } from "node:test";
 import { createApp } from "../../../dist/app.js";
@@ -7,12 +7,21 @@ import { MemoryClassRepository } from "../../../dist/memory-class-repository.js"
 import type { ClassDetails } from "../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; reason: string; };
+  prompt: {
+    availability: string;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "returns requested class details",
   prompt: {
-    availability: "unavailable",
-    reason: "Migrated existing API coverage.",
+    availability: "available",
+  
+    history: [
+      { when: "2026/11/16 11:45", text: "this is the server's response to getClasses. obviously not in the new format - there's an isPartial field there... this could be starting from the tests - check server api tests that they expect a state field and not isPartial. this will propagate to all tests relying on isPartial - change to state field" },
+    ],
   },
 };
 export function registerClassDetailsCase(): void {
@@ -41,7 +50,7 @@ export function registerClassDetailsCase(): void {
           many: true,
         },
       ],
-      isPartial: false,
+      
     };
     await repository.updateClasses([connections]);
     const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
@@ -65,6 +74,8 @@ export function registerClassDetailsCase(): void {
       assert.equal(response.status, 200);
       const result: readonly ClassDetails[] = await response.json() as readonly ClassDetails[];
       assert.deepEqual(result.map((item) => item.name), ["ClassDiagram", "Class", "RelationshipSource"]);
+      assert.equal(result.find((item: ClassDetails) => item.name === 'Class')?.state, 'partial');
+      assert.ok(result.every((item: ClassDetails) => !('isPartial' in item)));
       const relationshipSource: ClassDetails | undefined = result.find((item: ClassDetails) => item.name === "RelationshipSource");
       assert.deepEqual(relationshipSource?.relations, connections.relations);
     } finally {

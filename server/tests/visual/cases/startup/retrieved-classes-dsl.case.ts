@@ -1,18 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Locator } from "playwright";
-import { page } from "../../test-support.js";
+import { page, setVisualClasses } from "../../test-support.js";
 import { logAndThrow, logVisualEvent } from "../../logging.js";
 import type { ClassDetails } from "../../../../dist/memory-repository.js";
 
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "selects every retrieved class and renders its exact DSL in the editor",
   prompt: {
     availability: "available",
-    text: "For every class retrieved by the Classes page, select its graph box and verify the editor contains its expected DSL; log the actual editor text as ERROR before a mismatch fails.",
+    old: "For every class retrieved by the Classes page, select its graph box and verify the editor contains its expected DSL; log the actual editor text as ERROR before a mismatch fails.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "add a client/visual test - each retrieved class is selected and the text editor is inspected for the expected textual representation.\nif the textual representation does not match the expected dsl format - the test fails (log actual text in editor as an ERROR log line)" },
+    ],
   },
 };
 
@@ -33,9 +44,9 @@ const AUDIT_TRAIL: ClassDslExpectationT = {
       target: "AuditEvent",
       many: true,
     }],
-    isPartial: false,
+    
   },
-  dsl: "AuditTrail\n  record(entry: string)\n  identifier: unknown\n  enabled: unknown\n  count: unknown\nOWNS events: AuditEvent[]",
+  dsl: "AuditTrail\n  record(entry: string)\n  identifier: string\n  enabled: boolean\n  count: number\nOWNS events: AuditEvent[]",
 };
 
 const AUDIT_EVENT: ClassDslExpectationT = {
@@ -43,9 +54,9 @@ const AUDIT_EVENT: ClassDslExpectationT = {
     name: "AuditEvent",
     methods: [{ name: "occurredAt", overloads: [[{ arg: "+RO", t: "datetime" }]] }],
     relations: [],
-    isPartial: true,
+    state: 'partial',
   },
-  dsl: "AuditEvent\n  occurredAt: unknown",
+  dsl: "AuditEvent\n  occurredAt: datetime",
 };
 
 const AUDIT_SINK: ClassDslExpectationT = {
@@ -58,7 +69,7 @@ const AUDIT_SINK: ClassDslExpectationT = {
       target: "AuditEvent",
       many: false,
     }],
-    isPartial: false,
+    
   },
   dsl: "AuditSink\n  write(event: AuditEvent)\nREF latest: AuditEvent",
 };
@@ -102,18 +113,10 @@ async function editorDslText(): Promise<string> {
 
 export function registerRetrievedClassesDslCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    await page.route("**/api/getClasses", async (route) => {
-      await route.fulfill({
-        json: EXPECTATIONS.map((item: ClassDslExpectationT) => item.details),
-      });
-    });
-    try {
-      await page.reload();
-      await assertSelectedClassDsl(AUDIT_TRAIL);
-      await assertSelectedClassDsl(AUDIT_EVENT);
-      await assertSelectedClassDsl(AUDIT_SINK);
-    } finally {
-      await page.unroute("**/api/getClasses");
-    }
+    await setVisualClasses(EXPECTATIONS.map((item: ClassDslExpectationT) => item.details));
+    await page.reload();
+    await assertSelectedClassDsl(AUDIT_TRAIL);
+    await assertSelectedClassDsl(AUDIT_EVENT);
+    await assertSelectedClassDsl(AUDIT_SINK);
   });
 }

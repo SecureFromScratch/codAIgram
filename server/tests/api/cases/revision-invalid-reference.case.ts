@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
+import { MemoryClassRepository } from '../../../dist/memory-class-repository.js';
+import { parseStoredClassRevision, parseStoredClassSnapshot } from '../../../dist/class-storage-schema.js';
+import type { ClassRevision, ClassUpdate } from '../../../dist/class-revision.js';
+import { INITIAL, SCAN, USER } from '../support/class-revision-support.js';
+import type { TestCaseMetadata } from '../../test-case-metadata.js';
+
+export const TEST_CASE_METADATA: TestCaseMetadata = {
+  title: "rejects modifications that do not identify an existing member",
+  prompt: {
+    availability: 'available',
+    old: "Track class changes and deletions under one originator per complete update.",
+    history: [
+      { when: "2026/11/15 09:35", text: "calling updateClasses is with a SINGLE originatoor type, name, version tag (usually a timestamp).\nall changes in that updated are attributed to them - including the deletion.\nin fact - a good storage structure will hold the current state in one document type and the history in another, where history only has the originators name etc once. this is a bit like git - current version on top and deltas going back" },
+    ],
+  },
+};
+
+export function registerRevisionInvalidReferenceCase(): void {
+  it(TEST_CASE_METADATA.title, () => {
+    const created = reviseClass(INITIAL, undefined, SCAN);
+    const invalid: ClassUpdate = {
+      name: 'Notebook',
+      methods: [{ name: 'search', modifies: 'missing', overloads: [] }],
+      relations: [],
+      
+    };
+    assert.throws(() => reviseClass(invalid, created.current, USER), /does not exist/);
+  });
+}

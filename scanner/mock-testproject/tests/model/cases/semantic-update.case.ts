@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'updates semantic data when the text changes',
   prompt: {
     availability: 'available',
-    text: 'Make the graph representation update dynamically when diagram text changes.'
+    old: 'Make the graph representation update dynamically when diagram text changes.'
+  ,
+    history: [],
   }
 };
 

@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'rejects unknown declarations and malformed parameters',
   prompt: {
     availability: 'available',
-    text: 'Report invalid method syntax but allow typed generic parameter types in the diagram DSL.'
+    old: 'Report invalid method syntax but allow typed generic parameter types in the diagram DSL.'
+  ,
+    history: [],
   }
 };
 

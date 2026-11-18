@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'rejects incomplete relationships and headings',
   prompt: {
     availability: 'available',
-    text: 'Show syntax errors for a missing class name and for an incomplete OWNS type.'
+    old: 'Show syntax errors for a missing class name and for an incomplete OWNS type.'
+  ,
+    history: [],
   }
 };
 

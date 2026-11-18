@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { page } from "../../test-support.js";
+import { page, setVisualClasses } from "../../test-support.js";
 import type { ClassDetails } from "../../../../dist/memory-repository.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "loads every class when the Classes page is selected",
   prompt: {
     availability: "available",
-    text: "When Classes is selected, fetch every class through getClasses and render all returned class boxes rather than requesting only ClassDiagram and Class.",
+    old: "When Classes is selected, fetch every class through getClasses and render all returned class boxes rather than requesting only ClassDiagram and Class.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "change client tests for classes - they should choose the classes page and see that ALL classes are fetched, not just specific classes (now it's only \"Class\", \"ClassDiagram\")" },
+      { when: "2026/11/15 09:35", text: "with current workbench classes returned by server the client in classes-page does not display the classes graph - instead it displays \"Could not load class details. Check that the server is running and reload.\".\n1) ensure server/emulator/client in tests do not use same port numbers as used by workbench\n2) ensure this is not the case in the visual tests. if yes - add tests expecting a class graph." },
+    ],
   },
 };
 
@@ -23,29 +35,30 @@ const ALL_CLASSES: readonly ClassDetails[] = [
       target: "AuditEvent",
       many: true,
     }],
-    isPartial: false,
+    
   },
   {
     name: "AuditEvent",
     methods: [],
     relations: [],
-    isPartial: true,
+    state: 'partial',
   },
   {
     name: "AuditSink",
     methods: [{ name: "record", overloads: [[]] }],
     relations: [],
-    isPartial: false,
+    
   },
 ];
 
 export function registerStartupLoadsDiagramCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     let getClassesRequestCount: number = 0;
-    await page.route("**/api/getClasses", async (route) => {
-      getClassesRequestCount += 1;
-      await route.fulfill({ json: ALL_CLASSES });
-    });
+    await setVisualClasses(ALL_CLASSES);
+    const countRequest: (requestValue: import("playwright").Request) => void = (requestValue) => {
+      if (requestValue.url().endsWith("/api/getClasses") && requestValue.method() === "GET") getClassesRequestCount += 1;
+    };
+    page.on("request", countRequest);
     try {
       const request: Promise<import("playwright").Request> = page.waitForRequest(
         (requestValue) => requestValue.url().endsWith("/api/getClasses") && requestValue.method() === "GET",
@@ -54,17 +67,26 @@ export function registerStartupLoadsDiagramCase(): void {
       await request;
       await page.getByRole("tab", { name: "Tests" }).click();
       await page.getByRole("tab", { name: "Classes" }).click();
-      await page.locator(".joint-type-standard-headeredrectangle").waitFor();
+      await page.locator('[data-class-name="AuditTrail"]').waitFor();
       assert.equal(getClassesRequestCount, 1);
       const classNames: readonly string[] = ALL_CLASSES.map((item: ClassDetails) => item.name);
       const classBoxWaits: readonly Promise<void>[] = classNames.map((className: string) => page.locator(`[data-class-name="${className}"]`).waitFor());
       await Promise.all(classBoxWaits);
+      await page.evaluate(() => {
+        const app: { selectClass: (name: string) => void } | undefined =
+          (window as Window & { __app?: { selectClass: (name: string) => void } }).__app;
+        if (!app) throw new Error("Application command hook is unavailable.");
+        app.selectClass("AuditTrail");
+      });
+      await page.waitForFunction(
+        () => document.querySelector(".cm-content")?.textContent?.includes("recalcLayout()") === true,
+      );
       const editorText: Awaited<ReturnType<import("playwright").Locator["textContent"]>> = await page
         .getByRole("textbox", { name: "Diagram text" })
         .textContent();
       assert.ok(editorText?.includes("recalcLayout()"));
     } finally {
-      await page.unroute("**/api/getClasses");
+      page.off("request", countRequest);
     }
   });
 }

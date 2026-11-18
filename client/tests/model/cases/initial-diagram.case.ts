@@ -6,7 +6,9 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'models the initial class, members, and one-to-many relationship',
   prompt: {
     availability: 'available',
-    text: 'Create the initial ClassDiagram model with methods and an OWNS one-to-many relation to Class.'
+    old: 'Create the initial ClassDiagram model with methods and an OWNS one-to-many relation to Class.'
+  ,
+    history: [],
   }
 };
 

@@ -6,7 +6,11 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
   title: 'keeps empty methods and unrecognized members intact',
   prompt: {
     availability: 'available',
-    text: 'Display method names in class boxes while preserving non-method DSL lines without changing their text.'
+    old: 'Display method names in class boxes while preserving non-method DSL lines without changing their text.'
+  ,
+    history: [
+      { when: '2026/11/16 12:30', text: 'adjust the test to expect x: ✏️Map<string, number>' },
+    ],
   }
 };
 
@@ -21,7 +25,7 @@ export function registerEmptyMembersCase(): void {
       tooltip: 'OWNS classes: Class[]' });
     expect(formatMember('foo(x: Map<string, number>)')).toEqual({
       text: 'foo',
-      tooltip: 'foo(x)\n-x: Map<string, number>',
-      parameters: [{ name: 'x', type: 'Map<string, number>' }] });
+      tooltip: 'foo(x)\n-x: ✏️Map<string, number>',
+      parameters: [{ name: 'x', type: '✏️Map<string, number>' }] });
   });
 }

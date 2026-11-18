@@ -7,7 +7,9 @@ export async function verifyReferencedHiddenPartial(
 ): Promise<void> {
   const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
     await resetOwnershipEditor();
-  const owner: string = `${text}\n${reference}`;
+  const relation: string | undefined = text.split("\n").find((line: string) => line.startsWith("OWNS "));
+  if (!relation) throw new Error("Expected the ClassDiagram ownership relation.");
+  const owner: string = text.replace(relation, `${reference}\n${relation}`);
   await editor.fill(`${owner}\n\n${name}`);
   await page.locator('[data-class-name="ClassDiagram"]').dblclick();
   await page.waitForFunction(

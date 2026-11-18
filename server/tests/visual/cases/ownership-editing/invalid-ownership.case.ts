@@ -7,13 +7,25 @@ import {
 } from "../../support/editor-support.js";
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title:
     "removes an invalid ownership link, marks its declaration, and recovers when retyped",
   prompt: {
     availability: "available",
-    text: "If OWNS is removed or mangled, remove the connector and mark the declaration with a red wavy syntax error; restore it when OWNS is retyped correctly.",
+    old: "If OWNS is removed or mangled, remove the connector and mark the declaration with a red wavy syntax error; restore it when OWNS is retyped correctly.",
+  
+    history: [
+      { when: "2026/11/15 09:35", text: "let's start updating dynamically from text to graph.\nadd a test - if OWNS keyword is removed/mangled - the line connecting to Class classbox is removed, classes:Class[] should be wavy-red-underlines to show syntax error." },
+      { when: "2026/11/15 09:35", text: "let's start updating dynamically from text to graph.\nadd a test - if OWNS keyword is removed/mangled - the line connecting to Class classbox is removed, classes:Class[] should be wavy-red-underlines to show syntax error.\nIf the OWNS keyword is retyped correctly - the line returns." },
+    ],
   },
 };
 export function registerInvalidOwnershipCase(): void {

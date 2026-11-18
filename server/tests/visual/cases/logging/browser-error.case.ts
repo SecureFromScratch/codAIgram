@@ -5,12 +5,21 @@ import { page } from "../../test-support.js";
 
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; text: string; };
+  prompt: {
+    availability: string;
+    [archivedField: string]: unknown;
+    history: {
+      when: string;
+      text: string;
+    }[];
+  };
 } = {
   title: "records browser logAndThrow failures in the visual test log",
   prompt: {
     availability: "available",
-    text: "Make browser-side visual test errors use the client logAndThrow and capture browser console output in a file for later inspection.",
+    old: "Make browser-side visual test errors use the client logAndThrow and capture browser console output in a file for later inspection.",
+  
+    history: [],
   },
 };
 
