@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as http from "node:http";
 import * as https from "node:https";
 import { execFileSync } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -8,6 +9,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { runTests } from "@vscode/test-electron";
 import selfsigned from "selfsigned";
+import { supportsHttpsFixture } from "./httpsSupport";
+import { err, ok } from "neverthrow";
 
 const host = "127.0.0.1";
 const port = 11100;
@@ -99,7 +102,7 @@ async function startHttpsFixture(): Promise<{ server: https.Server; url: string;
         server.once("error", reject);
         server.listen(0, "127.0.0.1", () => {
             const address = server.address();
-            if (address === null || typeof address === "string") {
+            if (!address || typeof address === "string") {
                 reject(new Error("HTTPS fixture did not receive a TCP port."));
                 return;
             }
@@ -110,8 +113,7 @@ async function startHttpsFixture(): Promise<{ server: https.Server; url: string;
     return { server, origin, url: `${origin}/` };
 }
 
-async function startHttpFixture(): Promise<{ server: import("node:http").Server; url: string; origin: string }> {
-    const http = await import("node:http");
+async function startHttpFixture(): Promise<{ server: http.Server; url: string; origin: string }> {
     const server = http.createServer((_request, response) => {
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end("<!doctype html><html><body><p>CodAIgram DNS rebinding test</p></body></html>");
@@ -120,7 +122,7 @@ async function startHttpFixture(): Promise<{ server: import("node:http").Server;
         server.once("error", reject);
         server.listen(0, "127.0.0.1", () => {
             const address = server.address();
-            if (address === null || typeof address === "string") {
+            if (!address || typeof address === "string") {
                 reject(new Error("HTTP fixture did not receive a TCP port."));
                 return;
             }
@@ -133,11 +135,12 @@ async function startHttpFixture(): Promise<{ server: import("node:http").Server;
 
 async function findChromiumExecutable(): Promise<string> {
     const candidates = [
-        process.env.PROGRAMFILES === undefined ? undefined : path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
-        process.env["PROGRAMFILES(X86)"] === undefined ? undefined : path.join(process.env["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe")
+        ...(process.platform === "linux" ? [process.env.CODAIGRAM_BRIDGE_CHROMIUM_PATH, "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"] : []),
+        ...(process.env.PROGRAMFILES ? [path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe")] : []),
+        ...(process.env["PROGRAMFILES(X86)"] ? [path.join(process.env["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe")] : [])
     ];
     for (const candidate of candidates) {
-        if (candidate === undefined) continue;
+        if (!candidate) continue;
         try {
             await fs.access(candidate);
             return candidate;
@@ -145,7 +148,7 @@ async function findChromiumExecutable(): Promise<string> {
             // Check the next installed Chromium browser.
         }
     }
-    throw new Error("The HTTPS browser test requires installed Chrome or Edge.");
+    throw new Error("Browser integration tests require an installed Chromium browser.");
 }
 
 async function assertPortIsAvailable(): Promise<void> {
@@ -153,7 +156,7 @@ async function assertPortIsAvailable(): Promise<void> {
         const probe = net.createServer();
         probe.once("error", (error) => reject(new Error(`Port ${port} is already in use: ${error.message}`)));
         probe.listen(port, host, () => {
-            probe.close((error) => error === undefined ? resolve() : reject(error));
+            probe.close((error) => error ? reject(error) : resolve());
         });
     });
 }
@@ -194,13 +197,13 @@ async function runScenario(scenario: string): Promise<void> {
     const closedFile = path.join(temporaryRoot, "shutdown-client-closed.json");
     const shutdownClientPath = path.join(temporaryRoot, "shutdown-client.cjs");
     let occupiedPort: net.Server | undefined;
-    const httpsFixture = await startHttpsFixture();
+    const httpsFixture = supportsHttpsFixture(process.platform) ? ok(await startHttpsFixture()) : err("HTTPS certificate tests are unsupported on Linux");
     const httpFixture = await startHttpFixture();
 
     try {
         await fs.writeFile(shutdownClientPath, shutdownClientScript, "utf8");
         await fs.mkdir(path.join(userDataDir, "User"), { recursive: true });
-        await fs.writeFile(path.join(userDataDir, "User", "settings.json"), JSON.stringify({ "codaigramBridge.trustedOrigins": ["https://codai.example", httpsFixture.origin, httpFixture.origin] }), "utf8");
+        await fs.writeFile(path.join(userDataDir, "User", "settings.json"), JSON.stringify({ "codaigramBridge.trustedOrigins": ["https://codai.example", ...(httpsFixture.isOk() ? [httpsFixture.value.origin] : []), httpFixture.origin] }), "utf8");
         await assertPortIsAvailable();
         occupiedPort = await occupyFixedPort();
         const electronRunAsNode = process.env.ELECTRON_RUN_AS_NODE;
@@ -213,7 +216,7 @@ async function runScenario(scenario: string): Promise<void> {
                 extensionTestsEnv: {
                     CODAIGRAM_BRIDGE_PORT_FILE: portFile,
                     CODAIGRAM_BRIDGE_SCENARIO: scenario,
-                    CODAIGRAM_BRIDGE_HTTPS_URL: httpsFixture.url,
+                    ...(httpsFixture.isOk() ? { CODAIGRAM_BRIDGE_HTTPS_URL: httpsFixture.value.url } : {}),
                     CODAIGRAM_BRIDGE_HTTP_URL: httpFixture.url,
                     CODAIGRAM_BRIDGE_CHROMIUM_PATH: await findChromiumExecutable(),
                     CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_PATH: shutdownClientPath,
@@ -228,7 +231,7 @@ async function runScenario(scenario: string): Promise<void> {
                 ]
             });
         } finally {
-            if (electronRunAsNode === undefined) {
+            if (typeof electronRunAsNode !== "string") {
                 delete process.env.ELECTRON_RUN_AS_NODE;
             } else {
                 process.env.ELECTRON_RUN_AS_NODE = electronRunAsNode;
@@ -245,19 +248,24 @@ async function runScenario(scenario: string): Promise<void> {
         await assertPortIsClosed(allocatedPort);
     } finally {
         await new Promise<void>((resolve) => {
-            if (occupiedPort === undefined) {
+            if (!occupiedPort) {
                 resolve();
                 return;
             }
             occupiedPort.close(() => resolve());
         });
         await fs.rm(temporaryRoot, { recursive: true, force: true });
-        await new Promise<void>((resolve) => httpsFixture.server.close(() => resolve()));
+        if (httpsFixture.isOk()) {
+            await new Promise<void>((resolve) => httpsFixture.value.server.close(() => resolve()));
+        }
         await new Promise<void>((resolve) => httpFixture.server.close(() => resolve()));
     }
 }
 
 async function main(): Promise<void> {
+    if (!supportsHttpsFixture(process.platform)) {
+        console.warn("*********************************************\n*********************************************\nHTTPS certificate integration test is unsupported on Linux and will be skipped.\n*********************************************\n*********************************************");
+    }
     await runScenario("auth");
     await runScenario("concurrency");
     await runScenario("shutdown");

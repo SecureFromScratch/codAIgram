@@ -10,6 +10,7 @@ export function run(): Promise<void> {
     mocha.addFile(path.resolve(__dirname, "extension.test.js"));
     mocha.addFile(path.resolve(__dirname, "connectionStatus.test.js"));
     mocha.addFile(path.resolve(__dirname, "listenerStartup.test.js"));
+    mocha.addFile(path.resolve(__dirname, "httpsSupport.test.js"));
 
     return new Promise((resolve, reject) => {
         mocha.run((failures) => {

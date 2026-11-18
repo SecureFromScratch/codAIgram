@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "codaigram-bridge",
   "displayName": "CodAIgram Bridge",
   "description": "A local WebSocket bridge for CodAIgram.",
@@ -67,7 +67,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "neverthrow": "^8.2.0",
     "ws": "^8.23.0"
   }
 }
-
