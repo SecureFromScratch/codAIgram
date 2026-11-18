@@ -1,6 +1,14 @@
+import type { Result } from 'neverthrow';
+import type { ClassDetails } from '@codaigram/shared/class-types';
+
 declare global {
   interface Window {
     logAndThrow: (error: Error) => never;
+    __app?: {
+      selectClass: (name: string) => void;
+      getSelection: () => readonly string[];
+      tryGetModel: (name: string) => Result<ClassDetails, Error>;
+    };
   }
 }
 
