@@ -16,6 +16,7 @@ export interface Relation {
 export interface Diagram {
   title: string;
   members: string[];
+  memberStatuses?: ('normal' | 'changed' | 'deleted')[];
   targets: Relation[];
   classes?: Diagram[];
 }
@@ -26,6 +27,24 @@ export type ParseResultT = { ok: true; diagram: Diagram } | {
   partialRetention?: 'retain' | 'discard' };
 
 const RELATION_KINDS: ReadonlySet<string> = new Set<string>(['OWNS', 'REF', 'UNK']);
+
+function hasValidGenericBrackets(type: string): boolean {
+  let depth: number = 0;
+  for (let index: number = 0; index < type.length; index++) {
+    const character: string = type.charAt(index);
+    if (character === '<') {
+      const previous: string = type.charAt(index - 1);
+      const next: string = type.charAt(index + 1);
+      if (!/[A-Za-z0-9_>\]]/.test(previous) || !/[A-Za-z_'"(]/.test(next)) return false;
+      depth++;
+    } else if (character === '>') {
+      const previous: string = type.charAt(index - 1);
+      if (depth === 0 || !/[A-Za-z0-9_>'"\]]/.test(previous)) return false;
+      depth--;
+    }
+  }
+  return depth === 0;
+}
 
 /** A deliberately small first grammar for class members and class relationships. */
 export function parseDiagram(text: string): ParseResultT {
@@ -85,6 +104,7 @@ function parseClass(text: string): ParseResultT {
   const targets: Relation[] = [];
   let relationError: string = '';
   let partialRetention: 'retain' | 'discard' = 'discard';
+  let relationshipsStarted: boolean = false;
   for (let index: number = 1; index < lines.length; index++) {
     const rawLine: string = lines.at(index) ?? '';
     const line: string = rawLine.trim();
@@ -92,6 +112,7 @@ function parseClass(text: string): ParseResultT {
     const relationMatch: RegExpMatchArray | null = line.match(/^([A-Z]+)\b/);
     const relationKind: string = relationMatch?.at(1) ?? '';
     if (RELATION_KINDS.has(relationKind)) {
+      relationshipsStarted = true;
       const named: RegExpMatchArray | string[] = line.match(/^(OWNS|REF|UNK)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)?\s*(\[\s*\])?\s*$/) ?? [];
       const unnamed: RegExpMatchArray | string[] = line.match(/^(OWNS|REF|UNK)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[\s*\])?\s*$/) ?? [];
       if (named[1]) {
@@ -111,6 +132,9 @@ function parseClass(text: string): ParseResultT {
         ok: false,
         message: 'Expected OWNS, REF, or UNK relationship.' };
     } else if (/^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)) {
+      if (relationshipsStarted) return {
+        ok: false,
+        message: 'Properties and methods must precede relationships.' };
       if (!/^ {2}[^\s]/.test(rawLine)) return { ok: false, message: 'Indent methods exactly two spaces.' };
       let method: string = line;
       let depth: number = (line.match(/\(/g) ?? []).length - (line.match(/\)/g) ?? []).length;
@@ -130,6 +154,13 @@ function parseClass(text: string): ParseResultT {
         message: 'Expected method parameters as name: type.' };
       members.push(method);
     } else if (/^ {2}\S/.test(rawLine) && /^[A-Za-z_][A-Za-z0-9_]*\s*:\s*\S/.test(line)) {
+      if (relationshipsStarted) return {
+        ok: false,
+        message: 'Properties and methods must precede relationships.' };
+      const propertyType: string = line.slice(line.indexOf(':') + 1).trim();
+      if (!hasValidGenericBrackets(propertyType)) return {
+        ok: false,
+        message: 'Generic type brackets must be complete and follow a type name.' };
       members.push(line);
     } else if (/^[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:/.test(line) && !/^\s/.test(rawLine)) {
       relationError = 'Expected OWNS, REF, or UNK before the relationship declaration.';

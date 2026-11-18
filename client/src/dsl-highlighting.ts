@@ -82,6 +82,7 @@ function errors(state: EditorState, hiddenNames: readonly string[]): DecorationS
   }
   let hasHeading: boolean = false;
   let blank: boolean = false;
+  let relationshipsStarted: boolean = false;
   const names: Set<string> = new Set<string>();
   for (let lineNumber: number = 1; lineNumber <= state.doc.lines; lineNumber++) {
     const line: ReturnType<EditorState['doc']['line']> = state.doc.line(lineNumber);
@@ -94,9 +95,18 @@ function errors(state: EditorState, hiddenNames: readonly string[]): DecorationS
     if (!/^\s/.test(line.text) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text) && !RELATION_KEYWORDS.has(text)) {
       const message: string = names.has(text) ? `Duplicate class name: ${text}.` : hiddenNames.includes(text) ? `Class ${text} already exists. Type @ to edit it.` : 'Separate classes with a blank line.';
       if (!blank || names.has(text) || hiddenNames.includes(text)) builder.add(line.from, line.to, error(message));
-      names.add(text); blank = false; continue;
+      names.add(text); blank = false; relationshipsStarted = false; continue;
     }
     blank = false;
+    const isRelationshipLine: boolean = /^\s*(?:OWNS|REF|UNK)\b/.test(text);
+    const isMethodLine: boolean = /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(text);
+    const isPropertyLine: boolean = /^ {2}[A-Za-z_][A-Za-z0-9_]*\s*:\s*\S/.test(line.text);
+    if (relationshipsStarted && (isMethodLine || isPropertyLine)) {
+      const start: number = line.text.indexOf(text);
+      builder.add(line.from + start, line.from + start + text.length, error('Properties and methods must precede relationships.'));
+      continue;
+    }
+    if (isRelationshipLine) relationshipsStarted = true;
     const malformed: boolean = !/^\s/.test(line.text) && !/^(?:OWNS|REF|UNK)\b/.test(text) && /^[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:/.test(text);
     const missingType: boolean = /^(?:OWNS|REF|UNK)\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*$/.test(text);
     if (malformed || missingType) {

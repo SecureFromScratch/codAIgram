@@ -10,3 +10,4 @@ ui-debug.log
 logs/
 scanner.log
 .workbench/
+*.log

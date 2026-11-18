@@ -1,9 +1,12 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import ts from 'typescript';
 import type { ClassDetails, ClassMember as ClassMemberT, CompositeTypeT, FieldType as FieldTypeT } from '@codaigram/shared/class-types';
 import { JsonMap } from '@codaigram/shared/json-map';
-import { initializeLog, log, logAndThrow, loggedFetch } from './utils.js';
+import type { ScannedClass as ClassDetailsT, ScannedUnknownRelation as RelationT, StoredScannedClass as StoredClassT } from '@codaigram/shared/model/class';
+import type { PromptHistoryEntry as PromptHistoryEntryT, ScannedTestCase as TestCaseT, TestScanResult as ScanResultT } from '@codaigram/shared/model/test';
+import { formatFailure, initializeLog, log, logAndThrow, loggedFetch } from './scanner_utils.js';
 
 enum FileType {
   Test = 'test',
@@ -16,28 +19,6 @@ type CliArgumentsT = {
   readonly fileTypes: readonly FileType[];
   readonly serverUrl?: string;
 };
-
-type ScanResultT = {
-  readonly groups: readonly string[];
-  readonly cases: readonly TestCaseT[];
-};
-
-type TestCaseT = {
-  readonly group: string;
-  readonly name: string;
-  readonly description: string;
-  readonly prompt: string;
-};
-
-type RelationT = {
-  readonly kind: 'UNK';
-  readonly name: string;
-  readonly target: string;
-  // UNTRUST-ALLOW-BOOLEAN: The existing class-details HTTP contract represents reference multiplicity as a boolean; Scanner must preserve that established wire shape while it has no dedicated multiplicity enum.
-  readonly many: boolean;
-};
-
-type ClassDetailsT = ClassDetails & { readonly declaration: 'CLASS' | 'INTERFACE'; };
 
 const GROUP_FILE_PATTERN: RegExp = /\.test\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const CASE_FILE_PATTERN: RegExp = /\.case\.(?:[cm]?[jt]s|[jt]sx)$/u;
@@ -127,6 +108,18 @@ function stringValue(expression: ts.Expression | undefined, fieldName: string, f
   return logAndThrow(new Error(`Test case ${filePath} must define TEST_CASE_METADATA.${fieldName} as a string literal.`));
 }
 
+function readPromptHistory(prompt: ts.ObjectLiteralExpression, casePath: string): PromptHistoryEntryT[] {
+  const history: ts.Expression | undefined = propertyInitializer(prompt, 'history');
+  if (!history || !ts.isArrayLiteralExpression(history)) return logAndThrow(new Error(`Test case ${casePath} must define prompt.history as an array.`));
+  return history.elements.map((entry: ts.Expression) => {
+    if (!ts.isObjectLiteralExpression(entry)) return logAndThrow(new Error(`Test case ${casePath} contains an invalid prompt history entry.`));
+    const when: string = stringValue(propertyInitializer(entry, 'when'), 'prompt.history.when', casePath);
+    const text: string = stringValue(propertyInitializer(entry, 'text'), 'prompt.history.text', casePath);
+    if (!when.trim() || !text.trim()) return logAndThrow(new Error(`Test case ${casePath} contains an empty prompt history entry.`));
+    return { when, text };
+  });
+}
+
 function readCaseMetadata(casePath: string): TestCaseT {
   const sourceText: string = fs.readFileSync(casePath, 'utf8');
   const sourceFile: ts.SourceFile = ts.createSourceFile(casePath, sourceText, ts.ScriptTarget.ESNext, true);
@@ -140,9 +133,10 @@ function readCaseMetadata(casePath: string): TestCaseT {
       const promptExpression: ts.Expression | undefined = propertyInitializer(declaration.initializer, 'prompt');
       if (!promptExpression || !ts.isObjectLiteralExpression(promptExpression)) return logAndThrow(new Error(`Test case ${casePath} must define TEST_CASE_METADATA.prompt.`));
       const availability: string = stringValue(propertyInitializer(promptExpression, 'availability'), 'prompt.availability', casePath);
-      const promptFieldName: string = availability === 'available' ? 'text' : 'reason';
-      const prompt: string = stringValue(propertyInitializer(promptExpression, promptFieldName), `prompt.${promptFieldName}`, casePath);
-      return { group: '', name: '', description, prompt };
+      if (availability !== 'available' && availability !== 'unavailable') return logAndThrow(new Error(`Test case ${casePath} has invalid prompt availability.`));
+      const prompts: PromptHistoryEntryT[] = readPromptHistory(promptExpression, casePath);
+      const prompt: string = prompts.at(-1)?.text ?? '';
+      return { group: '', name: '', description, prompt, prompts };
     }
   }
   return logAndThrow(new Error(`Test case ${casePath} must export TEST_CASE_METADATA.`));
@@ -171,10 +165,11 @@ function scanTests(rootPath: string): ScanResultT {
       group: groupName,
       name: caseName,
       description: metadata.description,
-      prompt: metadata.prompt });
+      prompt: metadata.prompt,
+      prompts: metadata.prompts });
     log('INFO', `TEST CASE ${groupName}.${caseName} ${JSON.stringify({
       description: metadata.description,
-      prompt: metadata.prompt })}`);
+      prompts: metadata.prompts })}`);
   }
   return {
     groups: groups.sort((left: string, right: string) => left.localeCompare(right)),
@@ -215,7 +210,8 @@ function compositeType(type: ts.TypeNode | undefined): CompositeTypeT {
   if (ts.isUnionTypeNode(type) && type.types.every((part: ts.TypeNode) => ts.isLiteralTypeNode(part) && ts.isStringLiteral(part.literal))) {
     return type.types.map((part: ts.TypeNode) => (part as ts.LiteralTypeNode).literal.getText().slice(1, -1));
   }
-  return type.getText().replace(/\s+/gu, ' ').trim();
+  const withoutComments: string = ts.createPrinter({ removeComments: true }).printNode(ts.EmitHint.Unspecified, type, type.getSourceFile());
+  return withoutComments.replace(/\s+/gu, ' ').trim();
 }
 
 function appendMember(members: Map<string, FieldTypeT[][]>, name: string, overload: FieldTypeT[]): void {
@@ -317,22 +313,63 @@ function classDetailsFor(declaration: ts.ClassDeclaration | ts.InterfaceDeclarat
     declaration: ts.isClassDeclaration(declaration) ? 'CLASS' : 'INTERFACE',
     name,
     methods: Array.from(memberOverloads.entries(), ([name, overloads]: [string, FieldTypeT[][]]) => ({ name, overloads })),
-    relations,
-    isPartial: false };
+    relations };
 }
 
 function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
   const discovered: readonly string[] = rootPaths.flatMap(findFiles);
   const knownFiles: ReadonlySet<string> = new Set(discovered);
   const files: readonly string[] = discovered.filter((filePath: string) => isClassSource(filePath, knownFiles));
+  const program: ts.Program = ts.createProgram(files, {
+    allowJs: true,
+    noEmit: true,
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  });
+  const checker: ts.TypeChecker = program.getTypeChecker();
+  const exceptionDeclarations: Set<ts.Declaration> = new Set<ts.Declaration>();
+  function extendsError(type: ts.Type, visited: Set<ts.Type>): boolean {
+    if (visited.has(type)) return false;
+    visited.add(type);
+    const symbol: ts.Symbol | undefined = type.getSymbol();
+    if (symbol?.name === 'Error' && symbol.getDeclarations()?.some((declaration: ts.Declaration) => program.isSourceFileDefaultLibrary(declaration.getSourceFile()))) return true;
+    if (!(type.flags & ts.TypeFlags.Object)) return false;
+    const objectType: ts.ObjectType = type as ts.ObjectType;
+    if (!(objectType.objectFlags & ts.ObjectFlags.ClassOrInterface)) return false;
+    return checker.getBaseTypes(type as ts.InterfaceType).some((base: ts.BaseType) => extendsError(base, visited));
+  }
+  function markException(expression: ts.Expression): void {
+    const type: ts.Type = checker.getTypeAtLocation(expression);
+    const types: readonly ts.Type[] = type.isUnion() ? type.types : [type];
+    types.forEach((item: ts.Type) => item.getSymbol()?.getDeclarations()?.forEach((declaration: ts.Declaration) => exceptionDeclarations.add(declaration)));
+  }
+  function visit(node: ts.Node): void {
+    if (ts.isThrowStatement(node) && node.expression) markException(node.expression);
+    if (ts.isCallExpression(node) && ((ts.isIdentifier(node.expression) && node.expression.text === 'logAndThrow') || (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'logAndThrow'))) {
+      const argument: ts.Expression | undefined = node.arguments.at(0);
+      if (argument) markException(argument);
+    }
+    ts.forEachChild(node, visit);
+  }
+  files.forEach((filePath: string) => {
+    const source: ts.SourceFile | undefined = program.getSourceFile(filePath);
+    if (source) visit(source);
+  });
   const details: ClassDetailsT[] = [];
   files.forEach((filePath: string) => {
-    const sourceText: string = fs.readFileSync(filePath, 'utf8');
-    const sourceFile: ts.SourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.ESNext, true);
+    const sourceFile: ts.SourceFile | undefined = program.getSourceFile(filePath);
+    if (!sourceFile) return;
     sourceFile.forEachChild((node: ts.Node) => {
       if (!ts.isClassDeclaration(node) && !ts.isInterfaceDeclaration(node)) return;
       const detail: ClassDetailsT | undefined = classDetailsFor(node);
-      if (detail) details.push(detail);
+      if (detail) {
+        if (exceptionDeclarations.has(node) || ts.isClassDeclaration(node) && extendsError(checker.getTypeAtLocation(node), new Set<ts.Type>())) detail.usage = 'ex';
+        const root: string = rootPaths.find((candidate: string) => !path.relative(candidate, filePath).startsWith('..')) ?? rootPaths[0]!;
+        detail.sourceFile = path.relative(root, filePath).split(path.sep).join('/');
+        detail.modifiedAt = fs.statSync(filePath).mtime.toISOString();
+        details.push(detail);
+      }
     });
   });
   const uniqueNames: Set<string> = new Set<string>();
@@ -363,13 +400,68 @@ async function uploadTests(cases: readonly TestCaseT[], serverUrl: string): Prom
   log('INFO', `Test upload completed with HTTP ${String(response.status)}`);
 }
 
-async function uploadClasses(classes: readonly ClassDetailsT[], serverUrl: string): Promise<void> {
-  log('INFO', `Uploading ${classes.length} class declarations`);
-  const payload: string = JSON.stringify(classes.map((detail: ClassDetailsT) => ({
-    name: detail.name,
-    methods: detail.methods,
-    relations: detail.relations,
-    isPartial: detail.isPartial })));
+function sourceFilesFor(rootPaths: readonly string[]): ReadonlySet<string> {
+  const discovered: readonly string[] = rootPaths.flatMap(findFiles);
+  const knownFiles: ReadonlySet<string> = new Set(discovered);
+  const sourceFiles: Set<string> = new Set<string>();
+  discovered.filter((filePath: string) => isClassSource(filePath, knownFiles)).forEach((filePath: string) => {
+    const root: string = rootPaths.find((candidate: string) => !path.relative(candidate, filePath).startsWith('..')) ?? rootPaths[0]!;
+    sourceFiles.add(path.relative(root, filePath).split(path.sep).join('/'));
+  });
+  return sourceFiles;
+}
+
+type UploadClassT = Omit<ClassDetailsT, 'declaration'>;
+
+async function deletedClassesForRemovedDeclarations(classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<UploadClassT[]> {
+  const response: Response = await loggedFetch(new URL('/api/getClasses', serverUrl));
+  if (!response.ok) logAndThrow(new Error(`Class inventory lookup failed with HTTP ${String(response.status)}.`));
+  const inventory: { classes: StoredClassT[] } = await response.json() as { classes: StoredClassT[] };
+  const currentSourceFiles: ReadonlySet<string> = sourceFilesFor(rootPaths);
+  const declarationsBySourceFile: Map<string, ReadonlySet<string>> = new Map<string, ReadonlySet<string>>();
+  classes.forEach((item: ClassDetailsT) => {
+    if (!item.sourceFile) return;
+    const names: Set<string> = new Set<string>(declarationsBySourceFile.get(item.sourceFile) ?? []);
+    names.add(item.name);
+    declarationsBySourceFile.set(item.sourceFile, names);
+  });
+  return inventory.classes
+    .filter((item: StoredClassT) => {
+      if (typeof item.sourceFile !== 'string' || item.state === 'deleted') return false;
+      const currentDeclarations: ReadonlySet<string> | undefined = declarationsBySourceFile.get(item.sourceFile);
+      return !currentSourceFiles.has(item.sourceFile) || !currentDeclarations?.has(item.name);
+    })
+    .map((item: StoredClassT) => ({
+      name: item.name,
+      methods: [],
+      relations: [],
+      state: 'deleted'
+    }));
+}
+
+async function uploadClasses(classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<void> {
+  const deleted: UploadClassT[] = await deletedClassesForRemovedDeclarations(classes, rootPaths, serverUrl);
+  const updates: readonly UploadClassT[] = [...classes, ...deleted];
+  log('INFO', `Uploading ${updates.length} class declarations (${deleted.length} deleted from removed source files)`);
+  const payload: string = JSON.stringify({
+    origin: {
+      kind: 'scan',
+      name: os.userInfo().username,
+      version: new Date().toISOString(),
+    },
+    classes: updates.map((detail: UploadClassT) => ({
+      name: detail.name,
+      usage: detail.usage,
+      sourceFile: detail.sourceFile,
+      modifiedAt: detail.modifiedAt,
+      methods: detail.methods.map((member: ClassMemberT) => ({
+        name: member.name,
+        overloads: member.overloads.map((args) => ({ args })),
+      })),
+      relations: detail.relations,
+      state: detail.state,
+    })),
+  });
   const response: Response = await loggedFetch(new URL('/api/updateClasses', serverUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -430,7 +522,7 @@ async function run(): Promise<void> {
     const classes: readonly ClassDetailsT[] = scanClasses(argumentsValue.rootPaths);
     log('INFO', `Class scan completed: ${classes.length} declarations`);
     classes.forEach(printClassDetails);
-    if (argumentsValue.serverUrl) await uploadClasses(classes, argumentsValue.serverUrl);
+    if (argumentsValue.serverUrl) await uploadClasses(classes, argumentsValue.rootPaths, argumentsValue.serverUrl);
   }
 }
 
@@ -441,17 +533,18 @@ const requestedLogFile: string = logOptionIndex < 0 || !logFileArgument || logFi
 try {
   initializeLog(requestedLogFile);
 } catch (error: unknown) {
-  console.error('Could not initialize scanner log:', error);
+  console.error(formatFailure('Could not initialize scanner log:', error));
   process.exitCode = 2;
 }
 
 if (process.exitCode !== 2) void run().catch((error: unknown) => {
-  console.error('Scanner failed:', error instanceof Error ? error.message : 'Unknown error');
+  console.error(formatFailure('Scanner failed:', error));
+  const failure: string = formatFailure('Scanner failed:', error);
   try {
-    log('WARN', error instanceof Error ? error.stack ?? error.message : String(error));
-    log('ERROR', error instanceof Error ? error.stack ?? error.message : String(error));
+    log('WARN', failure);
+    log('ERROR', failure);
   } catch (loggingError: unknown) {
-    console.error('Could not write scanner log:', loggingError);
+    console.error(formatFailure('Could not write scanner log:', loggingError));
   }
   process.exitCode = 2;
 });

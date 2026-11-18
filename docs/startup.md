@@ -49,6 +49,20 @@ the details of each class found; it does not remove classes absent from a scan.
 
 To discard all workbench data, stop the emulator and delete `.workbench/firestore/` yourself. No test or normal development command uses that directory.
 
+To convert older workbench class documents from `isPartial` to optional `state`
+and assign internal non-cryptographic IDs, build the server and run the local
+conversion script. The first command reports changes; the second applies them:
+
+```bash
+npx tsc -b server
+GOOGLE_CLOUD_PROJECT=demo-codaigram FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node scripts/migrate-local-class-state.mjs
+GOOGLE_CLOUD_PROJECT=demo-codaigram FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node scripts/migrate-local-class-state.mjs --apply
+```
+
+The script only accepts the local workbench project and emulator address. It
+preserves existing IDs, assigns the same ID to a class's snapshot and revisions,
+and can be rerun. Stop the emulator normally afterward to export its data.
+
 ## Temporary emulator and seeded sample data
 
 For a temporary emulator session with the sample classes, run the emulator in one terminal:
@@ -95,6 +109,7 @@ Stop each process with Ctrl+C in its terminal. Do not stop an emulator or server
 
 - `npm run verify` runs the build and ordinary tests. Its HTTP and browser tests use a deterministic in-memory repository and do not need an emulator or persist workbench data.
 - `npm run test:visual` captures browser console messages and uncaught browser errors in `logs/visual-tests.log`, replacing that file at the start of each run. The log may contain application data; keep it private.
+- The server appends JSON Lines runtime events and caught exceptions to `logs/server.log`. It does not log HTTP request or response bodies. Use `tail -f logs/server.log` in Bash or `Get-Content -Wait logs/server.log` in PowerShell while diagnosing a running server.
 - `npm run test:firestore` starts an isolated Firestore emulator on `127.0.0.1:18080`, distinct from the workbench emulator on `8080`, then tests the actual Firestore repository through the HTTP route. It creates uniquely named test collections and terminates the test emulator afterward. Run a build first if server source has changed.
 
 - Automated API and visual-test servers bind an OS-assigned port rather than the workbench server port `3001`. Visual tests run Vite on strict test-only port `41731`, not the workbench client port `5173`. The Firestore test emulator uses `18080` with auxiliary test-only hub, logging, and WebSocket ports `14400`, `14500`, and `19151`.

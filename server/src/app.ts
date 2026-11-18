@@ -1,24 +1,30 @@
 import express from '@untrust/mandate-express';
 import { RequestValidationError } from '@untrust/mandate-core';
-import { array, classifications, defineTypes, defineUncheckedCustomArchetype, disclosures, issue, noAdditionalValidation, object, regexString, type InferValue, type ValidationResult } from '@untrust/vv';
+import { ALLOWDUPS, vv } from '@untrust/vv/zod';
+import { z } from 'zod';
+import { Archetype, array, defineTypes, defineUncheckedCustomArchetype, DisclosurePolicy, disclosures, issue, noAdditionalValidation, object, regexString, type InferValue, type ValidationResult } from '@untrust/vv';
 import { JsonMap } from '@codaigram/shared/json-map';
 import type { ClassDetails, CompositeTypeT, FieldType } from '@codaigram/shared/class-types';
-import type { ClassRepository, TestDetails, TestInventoryRepository } from './memory-repository.js';
-import { logAndThrow } from './utils.js';
+import type { ClassRepository, TestDetails, TestIdentifier, TestInventoryRepository, TestRecord } from './memory-repository.js';
+import type { DatabaseClassChange } from './memory-repository.js';
+import type { ClassHistory, ClassOrigin, ClassUpdate, CurrentClass } from './class-revision.js';
+import { InvalidClassRevisionError } from './class-revision.js';
+import { logAndThrow, logUnhandledRequestError, logValueShape } from './server_utils.js';
+import { ERROR_CODES } from './error-codes.js';
 
-type PublicClassificationFactoryT = typeof classifications.public;
+//type PublicClassificationFactoryT = typeof classifications.public;
 type PublicStringDisclosureFactoryT = typeof disclosures.public<string>;
 type PublicBooleanDisclosureFactoryT = typeof disclosures.public<boolean>;
 type PublicFieldTypeDisclosureFactoryT = typeof disclosures.public<FieldType>;
-type PublicClassificationT = ReturnType<PublicClassificationFactoryT>;
-type PublicStringDisclosureT = ReturnType<PublicStringDisclosureFactoryT>;
+//type PublicClassificationT = ReturnType<PublicClassificationFactoryT>;
+////type PublicStringDisclosureT = ReturnType<PublicStringDisclosureFactoryT>;
 type PublicBooleanDisclosureT = ReturnType<PublicBooleanDisclosureFactoryT>;
 type PublicFieldTypeDisclosureT = ReturnType<PublicFieldTypeDisclosureFactoryT>;
-type RegexStringArchetypeT = ReturnType<typeof regexString>;
+//type RegexStringArchetypeT = ReturnType<typeof regexString>;
 type ClassMethodDefinitionT = {
-  archetype: RegexStringArchetypeT;
-  classification: PublicClassificationT;
-  disclosure: PublicStringDisclosureT;
+  archetype: Archetype<string>;
+  //classification: Classification;
+  disclosure: DisclosurePolicy<string, string>;
 };
 type RelationNameDefinitionT = ClassMethodDefinitionT;
 type RelationKindDefinitionT = ClassMethodDefinitionT;
@@ -26,7 +32,7 @@ type ClassNameDefinitionT = ClassMethodDefinitionT;
 type TestDefinitionT = ClassMethodDefinitionT;
 type FieldTypeDefinitionT = {
   archetype: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>>;
-  classification: PublicClassificationT;
+  //classification: PublicClassificationT;
   disclosure: PublicFieldTypeDisclosureT;
 };
 
@@ -36,7 +42,7 @@ const classNameDefinition: ClassNameDefinitionT = {
     bounds: { minimum: 1, maximum: 100 },
     pattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>()
 };
 const CLASS_NAME: ReturnType<typeof defineTypes<{ ClassName: ClassNameDefinitionT }>> = defineTypes({ ClassName: classNameDefinition });
@@ -47,7 +53,7 @@ const testGroupDefinition: TestDefinitionT = {
     bounds: { minimum: 1, maximum: 100 },
     pattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>() };
 const testNameDefinition: TestDefinitionT = {
   archetype: regexString({
@@ -55,7 +61,7 @@ const testNameDefinition: TestDefinitionT = {
     bounds: { minimum: 1, maximum: 100 },
     pattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>() };
 const testDescriptionDefinition: TestDefinitionT = {
   archetype: regexString({
@@ -63,7 +69,7 @@ const testDescriptionDefinition: TestDefinitionT = {
     bounds: { minimum: 1, maximum: 1000 },
     pattern: /^[\x20-\x7e]+$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>() };
 const testPromptDefinition: TestDefinitionT = {
   archetype: regexString({
@@ -71,7 +77,7 @@ const testPromptDefinition: TestDefinitionT = {
     bounds: { minimum: 1, maximum: 10000 },
     pattern: /^[\x20-\x7e\r\n\t]+$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>() };
 const TEST_VALUES: ReturnType<typeof defineTypes<{
   TestGroup: TestDefinitionT;
@@ -99,15 +105,85 @@ const TEST_DETAILS: ReturnType<typeof object<{
   description: TEST_VALUES.TestDescription,
   prompt: TEST_VALUES.TestPrompt });
 
+function historyRequestSchema() { return array(object({
+  group: TEST_VALUES.TestGroup,
+  name: TEST_VALUES.TestName,
+}), { minimum: 1, maximum: 100 }); }
+const TEST_HISTORY_REQUEST: ReturnType<typeof historyRequestSchema> = historyRequestSchema();
+function testChangeDto() { return vv.object({ when: vv.string(), text: vv.string() }); }
+const TEST_CHANGE_DTO: ReturnType<typeof testChangeDto> = testChangeDto();
+function testHistoryDto() { return vv.object({
+  group: vv.string(),
+  name: vv.string(),
+  prompts: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
+  descriptions: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
+}); }
+const TEST_HISTORY_DTO: ReturnType<typeof testHistoryDto> = testHistoryDto();
+function testSummaryDto() { return vv.object({
+  group: vv.string(),
+  name: vv.string(),
+  description: vv.string(),
+  lastChangedAt: vv.string(),
+}); }
+const TEST_SUMMARY_DTO: ReturnType<typeof testSummaryDto> = testSummaryDto();
+
+function testPromptHistoryDto() { return vv.object({
+  when: vv.string().trim().min(1).max(100),
+  text: vv.string().min(1).max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+$/u),
+}).strict(); }
+const TEST_PROMPT_HISTORY_DTO: ReturnType<typeof testPromptHistoryDto> = testPromptHistoryDto();
+function testUpdateDto() { return vv.object({
+  group: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  description: vv.string().trim().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
+  prompt: vv.string().max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/u).optional(),
+  prompts: vv.array(TEST_PROMPT_HISTORY_DTO, { min: 0, max: 100 }, ALLOWDUPS).optional(),
+}).strict(); }
+const TEST_UPDATE_DTO: ReturnType<typeof testUpdateDto> = testUpdateDto();
+function testUpdateBatchDto() { return vv.array(TEST_UPDATE_DTO, { min: 1, max: 10000 }, ALLOWDUPS); }
+const TEST_UPDATE_BATCH_DTO: ReturnType<typeof testUpdateBatchDto> = testUpdateBatchDto();
+type TestUpdateBatchT = TestDetails[];
+const TEST_UPDATE_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<TestUpdateBatchT>> = defineUncheckedCustomArchetype<TestUpdateBatchT>({
+  kind: 'codaigram.test-update-batch',
+  validate: (input: unknown) => {
+    const result: z.ZodSafeParseResult<z.output<typeof TEST_UPDATE_BATCH_DTO>> = TEST_UPDATE_BATCH_DTO.safeParse(input);
+    if (!result.success) return {
+      success: false,
+      issues: [issue(ERROR_CODES.TEST_UPDATE_INVALID, 'Invalid test update.')],
+    };
+    const tests: TestDetails[] = result.data.map((item) => ({
+      group: item.group,
+      name: item.name,
+      description: item.description,
+      prompt: item.prompt ?? '',
+      prompts: (item.prompts ?? []).map((entry) => ({ when: entry.when, text: entry.text })),
+    }));
+    return { success: true, value: tests };
+  },
+});
+type TestUpdateDisclosureFactoryT = typeof disclosures.public<TestUpdateBatchT>;
+type TestUpdateDisclosureT = ReturnType<TestUpdateDisclosureFactoryT>;
+type TestUpdateDefinitionT = {
+  archetype: typeof TEST_UPDATE_ARCHETYPE;
+  disclosure: TestUpdateDisclosureT;
+};
+const testUpdateDefinition: TestUpdateDefinitionT = {
+  archetype: TEST_UPDATE_ARCHETYPE,
+  disclosure: disclosures.public<TestUpdateBatchT>(),
+};
+const TEST_UPDATE_VALUES: ReturnType<typeof defineTypes<{ TestUpdate: TestUpdateDefinitionT }>> = defineTypes({ TestUpdate: testUpdateDefinition });
+type TestUpdateValueT = typeof TEST_UPDATE_VALUES.TestUpdate;
+const TEST_UPDATE_VALUE: TestUpdateValueT = TEST_UPDATE_VALUES.TestUpdate;
+
 // VV currently has no built-in boolean archetype; this checks the primitive exactly, without coercion.
 const BOOLEAN: ReturnType<typeof defineUncheckedCustomArchetype<boolean>> = defineUncheckedCustomArchetype<boolean>({
   kind: 'codaigram.boolean',
   validate: (input: unknown) => typeof input === 'boolean' ? { success: true, value: input } : {
     success: false,
-    issues: [issue('boolean.invalid', 'Expected a boolean.')] } });
+    issues: [issue(ERROR_CODES.BOOLEAN_INVALID, 'Expected a boolean.')] } });
 type BooleanValueDefinitionT = {
   archetype: typeof BOOLEAN;
-  classification: PublicClassificationT;
+  //classification: PublicClassificationT;
   disclosure: PublicBooleanDisclosureT;
 };
 const methodDefinition: ClassMethodDefinitionT = {
@@ -116,7 +192,7 @@ const methodDefinition: ClassMethodDefinitionT = {
     bounds: { minimum: 1, maximum: 1000 },
     pattern: /^[\x20-\x7e]+$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>()
 };
 function validateCompositeType(input: unknown, depth: number): ValidationResult<CompositeTypeT> {
@@ -126,7 +202,7 @@ function validateCompositeType(input: unknown, depth: number): ValidationResult<
     }
     return {
       success: false,
-      issues: [issue('field-type.invalid', 'Expected a bounded list of enum values.')] };
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a bounded list of enum values.')] };
   }
   if (typeof input === 'string') {
     if (input.length <= 1000 && /^[\x20-\x7e]+$/.test(input)) {
@@ -134,19 +210,19 @@ function validateCompositeType(input: unknown, depth: number): ValidationResult<
     }
     return {
       success: false,
-      issues: [issue('field-type.invalid', 'Expected a printable type string.')] };
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a printable type string.')] };
   }
   // UNTRUST-ALLOW-NULLISH: An untrusted JSON composite can be null, so reject it before treating its named entries as recursively composable values.
   if (typeof input !== 'object' || input === null || Array.isArray(input) || depth >= 20) {
     return {
       success: false,
-      issues: [issue('field-type.invalid', 'Expected a bounded composite type.')] };
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a bounded composite type.')] };
   }
   const entries: [string, unknown][] = Object.entries(input);
   if (entries.length > 100) {
     return {
       success: false,
-      issues: [issue('field-type.invalid', 'Expected at most 100 named composite fields.')] };
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected at most 100 named composite fields.')] };
   }
   const composite: JsonMap<string, CompositeTypeT> = new JsonMap<string, CompositeTypeT>();
   for (let index: number = 0; index < entries.length; index += 1) {
@@ -156,7 +232,7 @@ function validateCompositeType(input: unknown, depth: number): ValidationResult<
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       return {
         success: false,
-        issues: [issue('field-type.invalid', 'Expected a named composite field.')] };
+        issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a named composite field.')] };
     }
     const result: ValidationResult<CompositeTypeT> = validateCompositeType(item, depth + 1);
     if (!result.success) return result;
@@ -170,13 +246,16 @@ function validateFieldType(input: unknown, depth: number = 0): ValidationResult<
   if (typeof input !== 'object' || input === null || Array.isArray(input) || !('arg' in input) || !('t' in input) || typeof input.arg !== 'string' || input.arg.length === 0 || input.arg.length > 100 || !/^(?:\+[A-Z]+|[A-Za-z_][A-Za-z0-9_]*)$/.test(input.arg)) {
     return {
       success: false,
-      issues: [issue('field-type.invalid', 'Expected a field with arg and t.')] };
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a field with arg and t.')] };
   }
   const compositeResult: ValidationResult<CompositeTypeT> = validateCompositeType(input.t, depth);
   if (!compositeResult.success) return compositeResult;
-  return {
-    success: true,
-    value: { arg: input.arg, t: compositeResult.value } };
+  if ('mutability' in input && input.mutability !== 'm' && input.mutability !== 'x' && input.mutability !== 'r') return {
+    success: false,
+    issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Invalid argument mutability.')] };
+  const field: FieldType = { arg: input.arg, t: compositeResult.value };
+  if ('mutability' in input && (input.mutability === 'm' || input.mutability === 'x' || input.mutability === 'r')) field.mutability = input.mutability;
+  return { success: true, value: field };
 }
 
 type FieldTypeValidatorT = (input: unknown) => ValidationResult<FieldType>;
@@ -186,7 +265,7 @@ const FIELD_TYPE: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>> =
   validate: fieldTypeValidator });
 const fieldTypeDefinition: FieldTypeDefinitionT = {
   archetype: FIELD_TYPE,
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<FieldType>()
 };
 const relationNameDefinition: RelationNameDefinitionT = {
@@ -195,7 +274,7 @@ const relationNameDefinition: RelationNameDefinitionT = {
     bounds: { minimum: 0, maximum: 100 },
     pattern: /^(?:[A-Za-z_][A-Za-z0-9_]*)?$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>()
 };
 const relationKindDefinition: RelationKindDefinitionT = {
@@ -204,17 +283,12 @@ const relationKindDefinition: RelationKindDefinitionT = {
     bounds: { minimum: 3, maximum: 4 },
     pattern: /^(?:OWNS|REF|UNK)$/,
     validateAdditional: noAdditionalValidation }),
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<string>()
 };
 const multiplicityDefinition: BooleanValueDefinitionT = {
   archetype: BOOLEAN,
-  classification: classifications.public(),
-  disclosure: disclosures.public<boolean>()
-};
-const partialStatusDefinition: BooleanValueDefinitionT = {
-  archetype: BOOLEAN,
-  classification: classifications.public(),
+  //classification: classifications.public(),
   disclosure: disclosures.public<boolean>()
 };
 const VALUES: ReturnType<typeof defineTypes<{
@@ -223,47 +297,207 @@ const VALUES: ReturnType<typeof defineTypes<{
   RelationName: RelationNameDefinitionT;
   RelationKind: RelationKindDefinitionT;
   Multiplicity: BooleanValueDefinitionT;
-  PartialStatus: BooleanValueDefinitionT;
 }>> = defineTypes({
   Method: methodDefinition,
   FieldType: fieldTypeDefinition,
   RelationName: relationNameDefinition,
   RelationKind: relationKindDefinition,
-  Multiplicity: multiplicityDefinition,
-  PartialStatus: partialStatusDefinition
+  Multiplicity: multiplicityDefinition
 });
 type MethodT = typeof VALUES.Method;
 type FieldTypeT = typeof VALUES.FieldType;
 type RelationKindT = typeof VALUES.RelationKind;
 type RelationNameT = typeof VALUES.RelationName;
 type MultiplicityT = typeof VALUES.Multiplicity;
-type PartialStatusT = typeof VALUES.PartialStatus;
-const CLASS_MEMBER: ReturnType<typeof object<{
-  name: MethodT;
-  overloads: ReturnType<typeof array<ReturnType<typeof array<FieldTypeT>>>>;
-}>> = object({
-  name: VALUES.Method,
-  overloads: array(array(VALUES.FieldType, { minimum: 0, maximum: 100 }), { minimum: 0, maximum: 100 })
+function classOriginDto() { return vv.object({
+  kind: vv.enum(['scan', 'ai', 'user']),
+  name: vv.string().trim().min(1).max(100).regex(/^[^\x00-\x1f\x7f]+$/u),
+  version: vv.string().trim().min(1).max(100).regex(/^[\x20-\x7e]+$/),
+}).strict(); }
+const CLASS_ORIGIN_DTO: ReturnType<typeof classOriginDto> = classOriginDto();
+const VERSIONED_FIELD_DTO: z.ZodType<FieldType> = z.unknown().transform<FieldType>((input, context) => {
+  const result: ValidationResult<FieldType> = validateFieldType(input);
+  if (result.success) return result.value;
+  context.addIssue({ code: 'custom', message: 'Invalid field type.' });
+  return z.NEVER;
 });
-const CLASS_DETAILS: ReturnType<typeof object<{
-  name: ClassNameT;
-  methods: ReturnType<typeof array<typeof CLASS_MEMBER>>;
-  relations: ReturnType<typeof array<ReturnType<typeof object<{
-    kind: RelationKindT;
-    name: RelationNameT;
-    target: ClassNameT;
-    many: MultiplicityT }>>>>;
-  isPartial: PartialStatusT }>> = object({
-    name: CLASS_NAME.ClassName,
-    methods: array(CLASS_MEMBER, { minimum: 0, maximum: 100 }),
-    relations: array(object({
-      kind: VALUES.RelationKind,
-      name: VALUES.RelationName,
-      target: CLASS_NAME.ClassName,
-      many: VALUES.Multiplicity }), { minimum: 0, maximum: 100 }),
-    isPartial: VALUES.PartialStatus });
+const MEMBER_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/).optional();
+const RELATION_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/).optional();
+const OVERLOAD_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(256000).regex(/^[\x20-\x7e]*$/).optional();
+function versionedOverloadDto() { return vv.object({
+  args: vv.array(VERSIONED_FIELD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  modifies: OVERLOAD_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_OVERLOAD_DTO: ReturnType<typeof versionedOverloadDto> = versionedOverloadDto();
+function versionedMemberDto() { return vv.object({
+  name: vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
+  overloads: vv.array(VERSIONED_OVERLOAD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  modifies: MEMBER_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_MEMBER_DTO: ReturnType<typeof versionedMemberDto> = versionedMemberDto();
+function versionedRelationDto() { return vv.object({
+  kind: vv.enum(['OWNS', 'REF', 'UNK']),
+  name: vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
+  target: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  many: vv.boolean(),
+  modifies: RELATION_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_RELATION_DTO: ReturnType<typeof versionedRelationDto> = versionedRelationDto();
+function versionedClassDto() { return vv.object({
+  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  renameOf: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
+  state: vv.enum(['partial', 'deleted']).optional(),
+  usage: vv.enum(['ex', 'dto']).optional(),
+  sourceFile: vv.string().min(1).max(1024).regex(/^[^\x00-\x1f\x7f]+$/u).optional(),
+  modifiedAt: vv.string().datetime().optional(),
+  methods: vv.array(VERSIONED_MEMBER_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  relations: vv.array(VERSIONED_RELATION_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+}).strict(); }
+const VERSIONED_CLASS_DTO: ReturnType<typeof versionedClassDto> = versionedClassDto();
+function versionedBatchDto() { return vv.object({
+  origin: CLASS_ORIGIN_DTO,
+  classes: vv.array(VERSIONED_CLASS_DTO, { min: 1, max: 100 }, ALLOWDUPS),
+}).strict(); }
+const VERSIONED_BATCH_DTO: ReturnType<typeof versionedBatchDto> = versionedBatchDto();
+
+function normalizeVersionedClass(value: z.output<typeof VERSIONED_CLASS_DTO>): ClassUpdate {
+  const result: ClassUpdate = {
+    name: value.name,
+    methods: value.methods.map((member) => {
+      const result: ClassUpdate['methods'][number] = {
+        name: member.name,
+        overloads: member.overloads.map((overload) => {
+          const item: ClassUpdate['methods'][number]['overloads'][number] = { args: overload.args };
+          if (typeof overload.modifies === 'string') item.modifies = overload.modifies;
+          return item;
+        }),
+      };
+      if (typeof member.modifies === 'string') result.modifies = member.modifies;
+      return result;
+    }),
+    relations: value.relations.map((relation) => {
+      const result: ClassUpdate['relations'][number] = {
+        kind: relation.kind,
+        name: relation.name,
+        target: relation.target,
+        many: relation.many,
+      };
+      if (typeof relation.modifies === 'string') result.modifies = relation.modifies;
+      return result;
+    }),
+  };
+  if (value.renameOf) result.renameOf = value.renameOf;
+  if (value.state) result.state = value.state;
+  if (value.usage) result.usage = value.usage;
+  if (value.sourceFile) result.sourceFile = value.sourceFile;
+  if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
+  return result;
+}
+
+type ClassBatchT = { origin: ClassOrigin; classes: ClassUpdate[] };
+const CLASS_BATCH_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<ClassBatchT>> = defineUncheckedCustomArchetype<ClassBatchT>({
+  kind: 'codaigram.class-update-batch',
+  validate: (input: unknown) => {
+    const parsed: z.ZodSafeParseResult<z.output<typeof VERSIONED_BATCH_DTO>> = VERSIONED_BATCH_DTO.safeParse(input);
+    if (!parsed.success) return {
+      success: false,
+      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid class update.')],
+    };
+    return {
+      success: true,
+      value: {
+        origin: parsed.data.origin,
+        classes: parsed.data.classes.map(normalizeVersionedClass),
+      },
+    };
+  },
+});
+type ClassBatchDisclosureFactoryT = typeof disclosures.public<ClassBatchT>;
+type ClassBatchDisclosureT = ReturnType<ClassBatchDisclosureFactoryT>;
+type ClassBatchDefinitionT = {
+  archetype: typeof CLASS_BATCH_ARCHETYPE;
+  disclosure: ClassBatchDisclosureT;
+};
+const classBatchDefinition: ClassBatchDefinitionT = {
+  archetype: CLASS_BATCH_ARCHETYPE,
+  disclosure: disclosures.public<ClassBatchT>(),
+};
+const CLASS_BATCH_TYPES: ReturnType<typeof defineTypes<{ ClassBatch: ClassBatchDefinitionT }>> = defineTypes({ ClassBatch: classBatchDefinition });
+type ClassBatchValueT = typeof CLASS_BATCH_TYPES.ClassBatch;
+const CLASS_BATCH_VALUE: ClassBatchValueT = CLASS_BATCH_TYPES.ClassBatch;
+
+type RevisionRequestT = { howFarBack: number };
+const REVISION_REQUEST_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<RevisionRequestT>> = defineUncheckedCustomArchetype<RevisionRequestT>({
+  kind: 'codaigram.revision-request',
+  validate: (input: unknown) => {
+    const parsed: z.ZodSafeParseResult<{ howFarBack: number }> = vv.object({ howFarBack: z.number().int().min(0).max(999) }).strict().safeParse(input);
+    return parsed.success ? { success: true, value: parsed.data } : {
+      success: false,
+      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid revision request.')],
+    };
+  },
+});
+type RevisionRequestDefinitionT = {
+  archetype: typeof REVISION_REQUEST_ARCHETYPE;
+  disclosure: RevisionRequestDisclosureT;
+};
+type RevisionRequestDisclosureFactoryT = typeof disclosures.public<RevisionRequestT>;
+type RevisionRequestDisclosureT = ReturnType<RevisionRequestDisclosureFactoryT>;
+const revisionRequestDefinition: RevisionRequestDefinitionT = {
+  archetype: REVISION_REQUEST_ARCHETYPE,
+  disclosure: disclosures.public<RevisionRequestT>(),
+};
+const REVISION_REQUEST_TYPES: ReturnType<typeof defineTypes<{ Request: RevisionRequestDefinitionT }>> = defineTypes({ Request: revisionRequestDefinition });
 
 class DuplicateClassError extends Error {}
+
+type ErrorMiddlewareT = (
+  error: unknown,
+  request: unknown,
+  response: Parameters<Parameters<ReturnType<typeof express>['get']>[2]>[1],
+  next: (error: unknown) => void) => void;
+
+/**
+ * The current snapshot retains per-member provenance so `getClassesHistory`
+ * can reconstruct the selected class's history.  `getClasses` is deliberately
+ * an inventory endpoint: its class entries must remain the public ClassDetails
+ * shape, while the one database-wide latest delta is exposed as `lastChange`.
+ */
+function classDetailsFromCurrent(value: CurrentClass): ClassDetails {
+  const result: ClassDetails = {
+    name: value.name,
+    methods: value.methods.map((member) => ({
+      name: member.name,
+      overloads: member.overloads.map((overload) => overload.args),
+    })),
+    relations: value.relations.map((relation) => ({
+      kind: relation.kind,
+      name: relation.name,
+      target: relation.target,
+      many: relation.many,
+    })),
+  };
+  if (value.state) result.state = value.state;
+  if (value.usage) result.usage = value.usage;
+  if (value.sourceFile) result.sourceFile = value.sourceFile;
+  if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
+  return result;
+}
+
+const logRequestError: ErrorMiddlewareT = (error, _request, _response, next) => {
+  logUnhandledRequestError(error);
+  next(error);
+};
+
+const respondToRequestError: ErrorMiddlewareT = (error, _request, response, _next) => {
+  if (error instanceof Error && 'status' in error && error.status === 413) {
+    response.status(413).json({ error: 'Request is too large.' });
+  } else if (error instanceof RequestValidationError || error instanceof DuplicateClassError || error instanceof InvalidClassRevisionError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {
+    response.status(400).json({ error: 'Invalid request.' });
+  } else {
+    response.status(500).json({ error: 'Request could not be completed.' });
+  }
+};
 
 export function createApp(repository: ClassRepository & TestInventoryRepository): ReturnType<typeof express> {
   const app: ReturnType<typeof express> = express();
@@ -277,46 +511,82 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
     response.json(details);
   });
   app.get('/api/getClasses', {}, async (_request, response) => {
-    response.json(await repository.getClasses());
+    const current: CurrentClass[] = await repository.getClassSnapshots();
+    const names: Set<string> = new Set(current.map((item: CurrentClass) => item.name));
+    // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
+    const legacy: ClassDetails[] = (await repository.getClasses()).filter((item: ClassDetails) => !names.has(item.name));
+    const exposed: ClassDetails[] = current.map(classDetailsFromCurrent);
+    const result: {
+      classes: ClassDetails[];
+      lastChange?: DatabaseClassChange;
+    } = {
+      classes: [...legacy, ...exposed].sort((left, right) => left.name.localeCompare(right.name)),
+    };
+    const lastChange: DatabaseClassChange | undefined = await repository.getLastClassChange();
+    if (lastChange) result.lastChange = lastChange;
+    response.json(result);
   });
-  app.post('/api/updateClasses', { body: array(CLASS_DETAILS, { minimum: 1, maximum: 100 }) }, async (request, response) => {
-    const details: ClassDetails[] = request.body.map((item) => ({
-      name: item.name.exposeUnchecked(),
-      methods: item.methods.map((method) => ({
-        name: method.name.exposeUnchecked(),
-        overloads: method.overloads.map((overload) => overload.map((field) => field.exposeUnchecked())) })),
-      relations: item.relations.map((relation) => ({
-        kind: relation.kind.exposeUnchecked() === 'OWNS' ? 'OWNS' : relation.kind.exposeUnchecked() === 'REF' ? 'REF' : 'UNK',
-        name: relation.name.exposeUnchecked(),
-        target: relation.target.exposeUnchecked(),
-        many: relation.many.exposeUnchecked() })),
-      isPartial: item.isPartial.exposeUnchecked() }));
-    if (new Set(details.map((item: ClassDetails) => item.name)).size !== details.length) logAndThrow(new DuplicateClassError());
-    await repository.updateClasses(details);
-    response.json({ updated: details.length });
+  app.post('/api/getClassesHistory', {
+    body: object({
+      classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }),
+    }),
+  }, async (request, response) => {
+    const history: ClassHistory[] = await repository.getClassHistory(request.body.classNames.map((item) => item.exposeUnchecked()));
+    response.json(history.map((item: ClassHistory) => {
+      const result: {
+        name: string;
+        methods: ClassHistory['methods'];
+        relations: ClassHistory['relations'];
+        renames: ClassHistory['renames'];
+        state?: 'partial' | 'deleted';
+        usage?: 'ex' | 'dto';
+      } = {
+        name: item.name,
+        methods: item.methods,
+        relations: item.relations,
+        renames: item.renames,
+      };
+      if (item.state) result.state = item.state;
+      if (item.usage) result.usage = item.usage;
+      return result;
+    }));
+  });
+  app.post('/api/getRevisionIds', { body: REVISION_REQUEST_TYPES.Request }, async (request, response) => {
+    const input: RevisionRequestT = request.body.exposeUnchecked();
+    response.json(await repository.getRevisionIds(input.howFarBack));
+  });
+  app.post('/api/updateClasses', { body: CLASS_BATCH_VALUE }, async (request, response) => {
+    logValueShape('Validated /api/updateClasses body shape', request.body);
+    const batch: ClassBatchT = request.body.exposeUnchecked();
+    if (new Set(batch.classes.map((item) => item.name)).size !== batch.classes.length) logAndThrow(new DuplicateClassError());
+    const origin: ClassOrigin = batch.origin.kind === 'user'
+      ? {
+        kind: 'user',
+        name: 'yariv',
+        version: batch.origin.version,
+      }
+      : batch.origin;
+    await repository.updateClassSnapshots(batch.classes, origin);
+    response.json({ updated: batch.classes.length });
   });
   app.get('/api/getTests', {}, async (_request, response) => {
-    response.json(await repository.getTests());
+    const tests: TestRecord[] = await repository.getTests();
+    response.json(tests.map((item: TestRecord) => TEST_SUMMARY_DTO.parse(item)));
   });
-  app.post('/api/updateTests', {
-    body: array(TEST_DETAILS, { minimum: 1, maximum: 10000 }) }, async (request, response) => {
-    const tests: TestDetails[] = request.body.map((item) => ({
+  app.post('/api/getHistory', { body: TEST_HISTORY_REQUEST }, async (request, response) => {
+    const identifiers: TestIdentifier[] = request.body.map((item) => ({
       group: item.group.exposeUnchecked(),
       name: item.name.exposeUnchecked(),
-      description: item.description.exposeUnchecked(),
-      prompt: item.prompt.exposeUnchecked() }));
+    }));
+    response.json((await repository.getHistory(identifiers)).map((item) => TEST_HISTORY_DTO.parse(item)));
+  });
+  app.post('/api/updateTests', { body: TEST_UPDATE_VALUE }, async (request, response) => {
+    const tests: TestDetails[] = request.body.exposeUnchecked();
     if (new Set(tests.map((item: TestDetails) => `${item.group}.${item.name}`)).size !== tests.length) logAndThrow(new DuplicateClassError());
     await repository.updateTests(tests);
     response.json({ updated: tests.length });
   });
-  app.use(express.trustedMiddleware((error: unknown, _request: unknown, response: Parameters<Parameters<ReturnType<typeof express>['get']>[2]>[1], _next: (error: unknown) => void) => {
-    if (error instanceof Error && 'status' in error && error.status === 413) {
-      response.status(413).json({ error: 'Request is too large.' });
-    } else if (error instanceof RequestValidationError || error instanceof DuplicateClassError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {
-      response.status(400).json({ error: 'Invalid request.' });
-    } else {
-      response.status(500).json({ error: 'Request could not be completed.' });
-    }
-  }));
+  app.use(express.trustedMiddleware(logRequestError));
+  app.use(express.trustedMiddleware(respondToRequestError));
   return app;
 }

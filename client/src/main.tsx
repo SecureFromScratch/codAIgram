@@ -1,19 +1,46 @@
+/// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { EditorState, Transaction } from '@codemirror/state';
 import { history, historyKeymap } from '@codemirror/commands';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { dia, shapes } from '@joint/core';
+import type { Result } from 'neverthrow';
 import { parseDiagram, type Diagram, type ParseResultT, type Relation } from './model';
-import { classDetailsToText, loadClassDetails, type ClassDetails } from './class-details';
+import { classDetailsToDiagram, classDetailsToDiagramSet, loadClassDetails, type ClassDetails } from './class-details';
 import { formatMember, type MemberDisplay, type Parameter } from './signatures';
 import { dslErrorsFor, dslErrorTooltip, dslHighlighting } from './dsl-highlighting';
 import { scheduleClick } from './click-timer';
-import { logAndThrow } from './utils';
+import { logAndThrow } from './client_utils';
 import { loadTestsInventory, type TestCaseDetails } from './tests-inventory';
+import { ClassWorkspaceModel, Model } from './workspace-model';
 import './style.css';
 
 window.logAndThrow = logAndThrow;
+
+const EDITOR_PERCENT_STORAGE_KEY: string = 'codaigram.editorPercent';
+type ClassContextMenuT = { className: string; x: number; y: number };
+
+function loadEditorPercent(): number {
+  try {
+    // UNTRUST-ALLOW-NULLISH: Storage.getItem returns null when no split preference has been saved, so the missing value intentionally selects the default layout before the saved number is parsed.
+    const stored: string | null = window.localStorage.getItem(EDITOR_PERCENT_STORAGE_KEY);
+    if (!stored) return 42;
+    const parsed: number = Number(stored);
+    return Number.isFinite(parsed) && parsed >= 20 && parsed <= 80 ? parsed : 42;
+  } catch (error: unknown) {
+    console.warn('Could not read the saved workspace split.', error);
+    return 42;
+  }
+}
+
+function saveEditorPercent(value: number): void {
+  try {
+    window.localStorage.setItem(EDITOR_PERCENT_STORAGE_KEY, String(value));
+  } catch (error: unknown) {
+    console.warn('Could not save the workspace split.', error);
+  }
+}
 
 function fitText(text: string, maxWidth: number, font: string): string {
   // UNTRUST-ALLOW-NULLISH: Browser canvas context creation may fail; the boundary is checked immediately and the display falls back to a safe ellipsis.
@@ -31,9 +58,10 @@ function fitText(text: string, maxWidth: number, font: string): string {
   return `${prefix}…`;
 }
 
-function Editor({ initialText, onChange, selection, hiddenNames }: {
+function Editor({ initialText, onChange, onGoToClass, selection, hiddenNames }: {
   initialText: string;
   onChange: (value: string) => void;
+  onGoToClass: (className: string) => void;
   selection: { revision: number; text: string };
   hiddenNames: (text: string) => readonly string[] }) {
   // UNTRUST-ALLOW-NULLISH: React initializes DOM refs as null before mounting and clears them on unmount; this boundary is checked before any DOM access.
@@ -47,7 +75,19 @@ function Editor({ initialText, onChange, selection, hiddenNames }: {
       parent: host.current,
       state: EditorState.create({
         doc: initialText,
-        extensions: [lineNumbers(), history(), keymap.of(historyKeymap), dslHighlighting, dslErrorsFor(hiddenNames), dslErrorTooltip, EditorView.contentAttributes.of({ 'aria-label': 'Diagram text' }), EditorView.updateListener.of(update => { if (update.docChanged && !selecting.current) onChange(update.state.doc.toString()); })] }) });
+        extensions: [lineNumbers(), history(), keymap.of([
+          {
+            key: 'Ctrl-g',
+            run: (activeView: EditorView) => {
+              const line: ReturnType<EditorState['doc']['lineAt']> = activeView.state.doc.lineAt(activeView.state.selection.main.head);
+              const className: string = line.text.trim();
+              if (/^\s/.test(line.text) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(className)) return false;
+              onGoToClass(className);
+              return true;
+            },
+          },
+          ...historyKeymap,
+        ]), dslHighlighting, dslErrorsFor(hiddenNames), dslErrorTooltip, EditorView.contentAttributes.of({ 'aria-label': 'Diagram text' }), EditorView.updateListener.of(update => { if (update.docChanged && !selecting.current) onChange(update.state.doc.toString()); })] }) });
     editor.current = view;
     return () => {
       // UNTRUST-ALLOW-NULLISH: React editor refs use null as their unmounted state; clear the reference before destroying the view so later effects cannot use a stale instance.
@@ -76,6 +116,15 @@ type TooltipStateT = { visible: false } | {
   top: number;
   anchorTop: number };
 
+type ClassTooltipStateT = { visible: false } | {
+  visible: true;
+  name: string;
+  sourceFile: string;
+  modifiedAt: string;
+  left: number;
+  top: number;
+};
+
 function argumentColor(index: number): string { return `hsl(${(index * 137.508) % 360} 85% 78%)`; }
 
 function MethodTooltip({ member, left, top, anchorTop }: {
@@ -101,35 +150,46 @@ function MethodTooltip({ member, left, top, anchorTop }: {
     element.style.left = `${Math.max(minLeft, Math.min(left, maxRight - bounds.width))}px`;
   }, [member, left, top, anchorTop]);
   return <div id="method-tooltip" ref={tooltipRef} role="tooltip" className="method-tooltip" style={{ left, top }}>
-    {member.parameters ? <><div className="tooltip-signature"><strong>{member.text}</strong><span className="tooltip-paren">(</span>{parameters.map((parameter: Parameter, index: number) => <span key={`${index}-${parameter.name}`}><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span>{index + 1 < parameters.length ? <span className="tooltip-punctuation">, </span> : ''}</span>)}<span className="tooltip-paren">)</span></div>{parameters.length > 0 ? <div className="tooltip-parameters">{parameters.map((parameter: Parameter, index: number) => <div className="tooltip-parameter" key={`${index}-${parameter.name}`}><span className="tooltip-dash">—</span><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span><span className="tooltip-punctuation">: </span><span className="tooltip-type">{parameter.type}</span></div>)}</div> : ''}</> : <div className="tooltip-signature">{member.tooltip}</div>}
+    {member.parameters ? <><div className="tooltip-signature"><strong>{member.text}</strong><span className="tooltip-paren">(</span>{parameters.map((parameter: Parameter, index: number) => <span key={`${index}-${parameter.name}`}><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span>{index + 1 < parameters.length ? <span className="tooltip-punctuation">, </span> : ''}</span>)}<span className="tooltip-paren">)</span></div>{parameters.length > 0 ? <div className="tooltip-parameters">{parameters.map((parameter: Parameter, index: number) => <div className="tooltip-parameter" key={`${index}-${parameter.name}`}><span className="tooltip-dash">-</span><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span><span className="tooltip-punctuation">: </span><span className="tooltip-type">{parameter.type}</span></div>)}</div> : ''}</> : <div className="tooltip-signature">{member.tooltip}</div>}
   </div>;
 }
 
-function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: {
+function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, onEditChain }: {
   diagram: Diagram;
-  knownClasses: readonly ClassDetails[];
   partialRetention: 'retain' | 'discard';
   visible: readonly string[];
-  onSelect: (name: string, exclusive: boolean) => void }) {
+  focusRequest: { className: string; revision: number };
+  onSelect: (name: string, exclusive: boolean) => void;
+  onEditChain: (name: string) => void }) {
   const [tooltip, setTooltip]: [TooltipStateT, React.Dispatch<React.SetStateAction<TooltipStateT>>] = useState<TooltipStateT>({ visible: false });
+  const [classTooltip, setClassTooltip]: [ClassTooltipStateT, React.Dispatch<React.SetStateAction<ClassTooltipStateT>>] = useState<ClassTooltipStateT>({ visible: false });
+  const [contextMenu, setContextMenu]: [ClassContextMenuT | undefined, React.Dispatch<React.SetStateAction<ClassContextMenuT | undefined>>] = useState<ClassContextMenuT | undefined>(undefined);
   // UNTRUST-ALLOW-NULLISH: React initializes DOM refs as null before mounting and clears them on unmount; this boundary is checked before any DOM access.
   const host: React.RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const graphScroll: React.RefObject<{ left: number; top: number }> = useRef({ left: 0, top: 0 });
+  const lastFocusedRevision: React.RefObject<number> = useRef<number>(0);
+  useLayoutEffect(() => {
     if (!host.current) return;
+    const canvasHost: HTMLDivElement = host.current;
     const graph: dia.Graph = new dia.Graph({}, { cellNamespace: shapes });
     const surface: HTMLDivElement = document.createElement('div');
-    host.current.appendChild(surface);
+    canvasHost.appendChild(surface);
     const paper: dia.Paper = new dia.Paper({
       el: surface,
       model: graph,
       width: 1100,
-      height: 700,
+      height: Math.max(700, 400 + (diagram.classes?.length ?? 0) * 200),
       gridSize: 20,
       drawGrid: true,
       interactive: false,
       cellViewNamespace: shapes,
       background: { color: '#f8fafc' } });
-    const members: MemberDisplay[] = diagram.members.map(formatMember);
+    function formatClassMember(member: string, name: string): MemberDisplay {
+      const details: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+      const writable: string[] = details.isOk() ? details.value.methods.filter((item) => item.overloads.some((overload) => overload.some((field) => field.arg === '+RW' || field.arg === '+SET'))).map((item) => item.name) : [];
+      return formatMember(member, writable);
+    }
+    const members: MemberDisplay[] = diagram.members.map((member: string) => formatClassMember(member, diagram.title));
     const rows: string[] = members.map((member: MemberDisplay) => fitText(member.text, 176, '13px monospace'));
     const annotations: {
       start: number;
@@ -137,6 +197,9 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       attrs: {
         'data-method-tooltip': string;
         'data-method-index': string;
+        'data-member-change': string;
+        fill: string;
+        'text-decoration'?: string;
         'aria-describedby': string;
         tabindex: number } }[] = [];
     let offset: number = 0;
@@ -148,14 +211,26 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         attrs: {
           'data-method-tooltip': member.tooltip,
           'data-method-index': String(index),
+          'data-member-change': diagram.memberStatuses?.at(index) ?? 'normal',
+          fill: diagram.memberStatuses?.at(index) === 'changed' ? '#2563eb' : diagram.memberStatuses?.at(index) === 'deleted' ? '#24324b' : '#24324b',
+          'text-decoration': diagram.memberStatuses?.at(index) === 'deleted' ? 'line-through' : 'none',
           'aria-describedby': 'method-tooltip',
           tabindex: 0 } });
       offset += row.length + 1;
     });
     const height: number = Math.max(70, 54 + rows.length * 18);
-    const source: shapes.standard.HeaderedRectangle = new shapes.standard.HeaderedRectangle();
-    source.position(50, 140); source.resize(200, height);
-    source.attr({
+    const source: dia.Element = rows.length === 0 ? new shapes.standard.Rectangle() : new shapes.standard.HeaderedRectangle();
+    source.position(50, 140); source.resize(rows.length === 0 ? 150 : 200, rows.length === 0 ? 30 : height);
+    if (rows.length === 0) source.attr({
+      body: { fill: '#e8efff', stroke: '#b5c2d3', strokeWidth: 1.5 },
+      label: {
+        text: fitText(diagram.title, 130, 'bold 17px Arial'),
+        fill: '#233f73',
+        fontFamily: 'Arial',
+        fontSize: 17,
+        fontWeight: 'bold' },
+    });
+    else source.attr({
       body: { fill: '#fff', stroke: '#b5c2d3', strokeWidth: 1.5 },
       header: { fill: '#e8efff', stroke: '#b5c2d3', height: 30 },
       headerText: {
@@ -179,14 +254,17 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
     const nodeNames: Set<string> = new Set(diagram.targets.map((relation: Relation) => relation.target));
     (diagram.classes ?? []).forEach((item: Diagram) => { item.targets.forEach((relation: Relation) => { nodeNames.add(relation.target); }); });
     nodeNames.delete(diagram.title);
-    knownClasses.forEach((item: ClassDetails) => { if (!item.isPartial || partialRetention === 'retain') nodeNames.add(item.name); });
+    Model.current.getClassNames().forEach((className: string) => {
+      const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+      if (classModel.isOk() && classModel.value.state !== 'deleted' && (classModel.value.state !== 'partial' || partialRetention === 'retain')) nodeNames.add(className);
+    });
     const nodes: Map<string, dia.Element> = new Map<string, dia.Element>();
     let memberOffset: number = diagram.members.length;
     (diagram.classes ?? []).forEach((item: Diagram, index: number) => {
-      if (item.members.length === 0 && item.targets.length === 0) { nodeNames.add(item.title); return; }
+      if (item.members.length === 0) { nodeNames.add(item.title); return; }
       nodeNames.delete(item.title);
       const full: shapes.standard.HeaderedRectangle = new shapes.standard.HeaderedRectangle();
-      const entries: MemberDisplay[] = item.members.map(formatMember);
+      const entries: MemberDisplay[] = item.members.map((member: string) => formatClassMember(member, item.title));
       const rows: string[] = entries.map((entry: MemberDisplay) => fitText(entry.text, 176, '13px monospace'));
       const annotations: {
         start: number;
@@ -194,6 +272,9 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         attrs: {
           'data-method-tooltip': string;
           'data-method-index': string;
+          'data-member-change': string;
+          fill: string;
+          'text-decoration'?: string;
           'aria-describedby': string;
           tabindex: number } }[] = [];
       let offset: number = 0;
@@ -205,6 +286,9 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
           attrs: {
             'data-method-tooltip': entry.tooltip,
             'data-method-index': String(memberOffset + entryIndex),
+            'data-member-change': item.memberStatuses?.at(entryIndex) ?? 'normal',
+            fill: item.memberStatuses?.at(entryIndex) === 'changed' ? '#2563eb' : '#24324b',
+            'text-decoration': item.memberStatuses?.at(entryIndex) === 'deleted' ? 'line-through' : 'none',
             'aria-describedby': 'method-tooltip',
             tabindex: 0 } });
         offset += row.length + 1;
@@ -235,7 +319,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
     });
     Array.from(nodeNames).forEach((name: string, index: number) => {
       const target: shapes.standard.Rectangle = new shapes.standard.Rectangle();
-      target.position(400, 350 + index * 120); target.resize(150, 30);
+      target.position((diagram.classes?.length ?? 0) > 1 ? 50 : 400, 350 + index * 120); target.resize(150, 30);
       target.attr({
         body: { fill: '#e8efff', stroke: '#b5c2d3', strokeWidth: 1.5 },
         label: {
@@ -269,6 +353,7 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       const target: dia.Element | undefined = nodes.get(relation.target);
       if (!target) return;
       const link: shapes.standard.Link = new shapes.standard.Link();
+      link.router('rightAngle');
       link.source(ownerNode); link.target(target); link.attr({
         line: {
           stroke: '#7488a5',
@@ -294,10 +379,49 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
         attrs: { text: { text: '*', fontSize: 20, fill: '#233f73' } } });
       link.labels(labels); link.addTo(graph); link.toBack();
     }); });
-    return () => { paper.remove(); };
-  }, [diagram, knownClasses, partialRetention, visible]);
+    canvasHost.scrollLeft = graphScroll.current.left;
+    canvasHost.scrollTop = graphScroll.current.top;
+    if (focusRequest.revision > lastFocusedRevision.current) {
+      lastFocusedRevision.current = focusRequest.revision;
+      const target: Element | undefined = Array.from(canvasHost.querySelectorAll('[data-class-name]')).find((element: Element) => element.getAttribute('data-class-name') === focusRequest.className);
+      if (target) {
+        const hostBounds: DOMRect = canvasHost.getBoundingClientRect();
+        const targetBounds: DOMRect = target.getBoundingClientRect();
+        const maxLeft: number = Math.max(0, canvasHost.scrollWidth - canvasHost.clientWidth);
+        const maxTop: number = Math.max(0, canvasHost.scrollHeight - canvasHost.clientHeight);
+        const desiredLeft: number = canvasHost.scrollLeft + targetBounds.left - hostBounds.left + targetBounds.width / 2 - canvasHost.clientWidth / 2;
+        const desiredTop: number = canvasHost.scrollTop + targetBounds.top - hostBounds.top + targetBounds.height / 2 - canvasHost.clientHeight / 2;
+        canvasHost.scrollLeft = Math.max(0, Math.min(desiredLeft, maxLeft));
+        canvasHost.scrollTop = Math.max(0, Math.min(desiredTop, maxTop));
+      }
+    }
+    return () => {
+      graphScroll.current = { left: canvasHost.scrollLeft, top: canvasHost.scrollTop };
+      paper.remove();
+      surface.remove();
+    };
+  }, [diagram, partialRetention, visible, focusRequest]);
   function showTooltip(target: EventTarget, container: HTMLElement): void {
     if (!(target instanceof Element)) return;
+    // UNTRUST-ALLOW-NULLISH: Element.closest returns null for pointer events outside a class heading; only an existing heading can show class source information.
+    const classNameElement: Element | null = target.closest('text[joint-selector="headerText"], text[joint-selector="label"]');
+    if (classNameElement) {
+      const name: string = classNameElement.closest('[data-class-name]')?.getAttribute('data-class-name') ?? '';
+      const details: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+      if (details.isOk() && details.value.sourceFile && details.value.modifiedAt) {
+        const bounds: DOMRect = classNameElement.getBoundingClientRect();
+        const parent: DOMRect = container.getBoundingClientRect();
+        setClassTooltip({
+          visible: true,
+          name,
+          sourceFile: details.value.sourceFile,
+          modifiedAt: details.value.modifiedAt,
+          left: Math.max(8, Math.min(bounds.left - parent.left, parent.width - 288)),
+          top: Math.max(8, bounds.bottom - parent.top + 6),
+        });
+      }
+      return;
+    }
     // UNTRUST-ALLOW-NULLISH: The browser closest method returns null when the event did not originate from a method row; the next guard discards such events.
     const element: Element | null = target.closest('[data-method-index]');
     if (!element) return;
@@ -314,21 +438,22 @@ function Canvas({ diagram, knownClasses, partialRetention, visible, onSelect }: 
       anchorTop: bounds.top - parent.top });
   }
   const allMembers: string[] = [...diagram.members, ...(diagram.classes ?? []).flatMap((item: Diagram) => item.members)];
-  const member: MemberDisplay = tooltip.visible ? (allMembers.map(formatMember).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
+  const member: MemberDisplay = tooltip.visible ? (allMembers.map((item: string) => formatMember(item)).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
   const clickTimer: React.RefObject<number> = useRef<number>(0);
   useEffect(() => () => window.clearTimeout(clickTimer.current), []);
   function selectedClass(target: EventTarget): string {
     if (!(target instanceof Element)) return '';
     return target.closest('[data-class-name]')?.getAttribute('data-class-name') ?? '';
   }
-  return <div className="canvas-shell" onClick={event => { const name: string = selectedClass(event.target); if (!name) return; if (event.detail > 1) { window.clearTimeout(clickTimer.current); return; } window.clearTimeout(clickTimer.current); clickTimer.current = scheduleClick(() => onSelect(name, false)); }} onDoubleClick={event => { window.clearTimeout(clickTimer.current); const name: string = selectedClass(event.target); if (name) onSelect(name, true); }} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => setTooltip({ visible: false })} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => setTooltip({ visible: false })}>
+  return <div className="canvas-shell" onClick={event => { if (contextMenu) setContextMenu(undefined); const name: string = selectedClass(event.target); if (!name) return; if (event.detail > 1) { window.clearTimeout(clickTimer.current); return; } window.clearTimeout(clickTimer.current); clickTimer.current = scheduleClick(() => onSelect(name, false)); }} onContextMenu={event => { const name: string = selectedClass(event.target); if (!name) return; event.preventDefault(); setContextMenu({ className: name, x: event.clientX, y: event.clientY }); }} onDoubleClick={event => { window.clearTimeout(clickTimer.current); const name: string = selectedClass(event.target); if (name) onSelect(name, true); }} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }}>
     <div className="canvas" role="img" aria-label={`Diagram of ${diagram.title} with ${diagram.targets.map((relation: Relation) => relation.target).join(', ')}`} ref={host} />
     {tooltip.visible && member ? <MethodTooltip member={member} left={tooltip.left} top={tooltip.top} anchorTop={tooltip.anchorTop} /> : ''}
+    {classTooltip.visible ? <div role="tooltip" className="method-tooltip" style={{ left: classTooltip.left, top: classTooltip.top }}><strong>{classTooltip.name}</strong><div>File: {classTooltip.sourceFile}</div><div>Modified: <time dateTime={classTooltip.modifiedAt}>{classTooltip.modifiedAt}</time></div></div> : ''}
+    {contextMenu ? <div className="class-context-menu" role="menu" aria-label="Class actions" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { onSelect(contextMenu.className, false); setContextMenu(undefined); }}>Show class</button><button type="button" role="menuitem" onClick={() => { onEditChain(contextMenu.className); setContextMenu(undefined); }}>Edit chain</button></div> : ''}
   </div>;
 }
 
 interface DocumentState {
-  sources: Map<string, string>;
   shown: string[];
   validity: 'valid' | 'invalid';
 }
@@ -337,52 +462,103 @@ function classBlocks(text: string): string[] {
   return text.split(/\n[ \t]*\n(?=[A-Za-z_][A-Za-z0-9_]*[ \t]*(?:\n|$))/).map((block: string) => block.trim()).filter((block: string) => Boolean(block));
 }
 
-function canCompletePartial(source: string, name: string, text: string): boolean {
-    const partial: ParseResultT = parseDiagram(source);
-  if (!partial.ok || partial.diagram.members.length > 0 || partial.diagram.targets.length > 0) return false;
+function referencesPartialClass(name: string, text: string): boolean {
   const pattern: RegExp = new RegExp(`(?:\\:\\s*|\\(\\s*|,\\s*|^OWNS\\s+)${name}(?=[^A-Za-z0-9_]|$)`);
   return text.split(/\r?\n/).some((line: string) => pattern.test(line));
 }
 
-function Workspace({ initialText, initial, knownClasses }: {
+function hiddenClassTexts(shown: readonly string[], replacing: readonly string[], referenceText: string): string[] {
+  const hidden: string[] = [];
+  Model.current.getClassNames().forEach((className: string) => {
+    if (shown.includes(className) || replacing.includes(className)) return;
+    const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+    if (classModel.value.state === 'partial' && !referencesPartialClass(className, referenceText)) return;
+    hidden.push(Model.decompile(classModel.value));
+  });
+  return hidden;
+}
+
+function diagramWithModel(base: Diagram, referenceText: string): Diagram {
+  const represented: Set<string> = new Set([base.title, ...(base.classes ?? []).map((item: Diagram) => item.title)]);
+  const additional: Diagram[] = [];
+  Model.current.getClassNames().forEach((className: string) => {
+    if (represented.has(className)) return;
+    const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+    if (classModel.value.state === 'partial' && !referencesPartialClass(className, referenceText)) return;
+    additional.push(classDetailsToDiagram(classModel.value));
+  });
+  const classes: Diagram[] = [...(base.classes ?? []), ...additional];
+  return {
+    title: base.title,
+    members: base.members,
+    targets: base.targets,
+    classes,
+  };
+}
+
+function diagramFromModel(preferredNames: readonly string[], referenceText: string): Diagram | undefined {
+  const preferred: Set<string> = new Set(preferredNames);
+  const orderedNames: string[] = [...preferredNames, ...Model.current.getClassNames().filter((name: string) => !preferred.has(name))];
+  const details: ClassDetails[] = [];
+  orderedNames.forEach((className: string) => {
+    const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+    if (!preferred.has(className) && classModel.value.state === 'partial' && !referencesPartialClass(className, referenceText)) return;
+    details.push(classModel.value);
+  });
+  return classDetailsToDiagramSet(details);
+}
+
+function Workspace({ initialText, initial }: {
   initialText: string;
-  initial: Diagram;
-  knownClasses: readonly ClassDetails[] }) {
+  initial: Diagram }) {
   const [diagram, setDiagram]: [Diagram, React.Dispatch<React.SetStateAction<Diagram>>] = useState(initial);
   const [partialRetention, setPartialRetention]: ['retain' | 'discard', React.Dispatch<React.SetStateAction<'retain' | 'discard'>>] = useState<'retain' | 'discard'>('discard');
   const [message, setMessage]: [string, React.Dispatch<React.SetStateAction<string>>] = useState('Diagram is up to date');
   const document: React.RefObject<DocumentState> = useRef<DocumentState>({
-    sources: new Map([[initial.title, initialText]]),
     shown: [initial.title],
     validity: 'valid' });
   const [visible, setVisible]: [string[], React.Dispatch<React.SetStateAction<string[]>>] = useState<string[]>([initial.title]);
+  const [diagramFullscreen, setDiagramFullscreen]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
+  const [editorPercent, setEditorPercent]: [number, React.Dispatch<React.SetStateAction<number>>] = useState<number>(loadEditorPercent);
+  const [graphFocus, setGraphFocus]: [{ className: string; revision: number }, React.Dispatch<React.SetStateAction<{ className: string; revision: number }>>] = useState({ className: '', revision: 0 });
   const [selection, setSelection]: [{ revision: number; text: string }, React.Dispatch<React.SetStateAction<{ revision: number; text: string }>>] = useState({ revision: 0, text: initialText });
-  const hiddenNames: (text: string) => readonly string[] = useState(() => (text: string) => Array.from(document.current.sources.keys()).filter((name: string) => !document.current.shown.includes(name) && !canCompletePartial(document.current.sources.get(name) ?? '', name, text)))[0];
+  // UNTRUST-ALLOW-NULLISH: React refs begin without a mounted element and return to that state after unmount; the resize handler checks the ref before reading its bounds.
+  const workspaceElement: React.RefObject<HTMLElement | null> = useRef<HTMLElement>(null);
+  const splitterDragging: React.RefObject<boolean> = useRef<boolean>(false);
+  const renamedClasses: React.RefObject<Map<string, string>> = useRef<Map<string, string>>(new Map<string, string>());
+  const hiddenNames: (text: string) => readonly string[] = useState(() => (text: string) => Model.current.getClassNames().filter((name: string) => {
+    if (document.current.shown.includes(name)) return false;
+    const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+    return classModel.isOk() && classModel.value.state !== 'deleted' && !(classModel.value.state === 'partial' && referencesPartialClass(name, text));
+  }))[0];
+  function classText(className: string): string {
+    const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    return classModel.isOk() ? Model.decompile(classModel.value) : className;
+  }
   const change: (value: string) => void = useState(() => function update(value: string): void {
     const command: RegExpMatchArray | string[] = value.match(/^([A-Za-z_][A-Za-z0-9_]*)@[ \t]*$/m) ?? [];
     const requested: string = command.at(1) ?? '';
-    const stored: string = document.current.sources.get(requested) ?? '';
-    if (requested && stored && !document.current.shown.includes(requested)) {
-      const expanded: string = value.replace(/^([A-Za-z_][A-Za-z0-9_]*)@[ \t]*$/m, stored);
-      document.current.shown = [...document.current.shown, requested];
-      update(expanded);
-      setSelection((previous: { revision: number; text: string }) => ({ revision: previous.revision + 1, text: expanded }));
-      return;
+    if (requested && !document.current.shown.includes(requested)) {
+      const requestedClass: Result<ClassDetails, Error> = Model.current.tryGetModel(requested);
+      if (requestedClass.isOk()) {
+        const expanded: string = value.replace(/^([A-Za-z_][A-Za-z0-9_]*)@[ \t]*$/m, Model.decompile(requestedClass.value));
+        document.current.shown = [...document.current.shown, requested];
+        update(expanded);
+        setSelection((previous: { revision: number; text: string }) => ({ revision: previous.revision + 1, text: expanded }));
+        return;
+      }
     }
     if (!value.trim()) { document.current.validity = 'valid'; document.current.shown = []; setVisible([]); setMessage('Diagram is up to date'); return; }
     const result: ParseResultT = parseDiagram(value);
     if (!result.ok) {
       document.current.validity = 'invalid';
       if (result.diagram) {
-        const projected: string[] = [];
-        let inserted: boolean = false;
-        document.current.sources.forEach((source: string, name: string) => {
-          if (!document.current.shown.includes(name)) projected.push(source);
-          else if (!inserted) { projected.push(value); inserted = true; }
-        });
-        if (!inserted) projected.push(value);
+        const projected: string[] = [...hiddenClassTexts(document.current.shown, [], value), value];
         const partial: ParseResultT = parseDiagram(projected.join('\n\n'));
-        if (!partial.ok && partial.diagram) { setDiagram(partial.diagram); setPartialRetention(partial.partialRetention ?? 'discard'); setMessage(partial.message); }
+        if (!partial.ok && partial.diagram) { setDiagram(diagramWithModel(partial.diagram, value)); setPartialRetention(partial.partialRetention ?? result.partialRetention ?? 'discard'); setMessage(partial.message); }
         else setMessage(`${result.message} Showing the last valid diagram.`);
       } else setMessage(`${result.message} Showing the last valid diagram.`);
       return;
@@ -390,46 +566,219 @@ function Workspace({ initialText, initial, knownClasses }: {
     const blocks: string[] = classBlocks(value);
     const names: string[] = [result.diagram.title, ...(result.diagram.classes ?? []).map((item: Diagram) => item.title)];
     const old: DocumentState = document.current;
-    if (names.some((name: string) => old.sources.has(name) && !old.shown.includes(name) && !canCompletePartial(old.sources.get(name) ?? '', name, value))) { document.current.validity = 'invalid'; setMessage('A hidden class already has that name. Showing the last valid diagram.'); return; }
-    const updated: Map<string, string> = new Map<string, string>();
-    let next: number = 0;
-    old.sources.forEach((source: string, name: string) => {
-      if (!old.shown.includes(name)) { updated.set(name, source); return; }
-      const newName: string = names.at(next) ?? '';
-      const block: string = blocks.at(next) ?? '';
-      if (newName && block) updated.set(newName, block);
-      next++;
+    const existingNamesBeforeUpdate: ReadonlySet<string> = new Set<string>(Model.current.getClassNames());
+    const nameConflicts: boolean = names.some((name: string) => {
+      if (old.shown.includes(name)) return false;
+      const isRenameBack: boolean = old.shown.some((previousName: string, index: number) => names.at(index) === name && renamedClasses.current.get(previousName) === name);
+      if (isRenameBack) return false;
+      const existing: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+      return existing.isOk() && !(existing.value.state === 'partial' && referencesPartialClass(name, value));
     });
-    while (next < names.length) { const name: string = names.at(next) ?? ''; const block: string = blocks.at(next) ?? ''; if (name && block) updated.set(name, block); next++; }
-    const full: ParseResultT = parseDiagram(Array.from(updated.values()).join('\n\n'));
-    if (!full.ok) { document.current.validity = 'invalid'; setMessage(`${full.message} Showing the last valid diagram.`); return; }
-    document.current = { sources: updated, shown: names, validity: 'valid' };
-    setVisible(names); setDiagram(full.diagram); setPartialRetention('discard'); setMessage('Diagram is up to date');
+    if (nameConflicts) { document.current.validity = 'invalid'; setMessage('A hidden class already has that name. Showing the last valid diagram.'); return; }
+    const modelUpdates: ClassDetails[] = blocks.map((block: string) => {
+      const parsed: ClassDetails | Error = Model.parse(block);
+      if (parsed instanceof Error) logAndThrow(parsed);
+      return parsed;
+    });
+    Model.current.updateClasses(modelUpdates);
+    old.shown.forEach((previousName: string, index: number) => {
+      const nextName: string | undefined = names.at(index);
+      if (!nextName || previousName === nextName) return;
+      if (renamedClasses.current.get(previousName) === nextName) {
+        Model.current.markDeleted(previousName);
+        renamedClasses.current.delete(previousName);
+      } else if (!existingNamesBeforeUpdate.has(nextName)) renamedClasses.current.set(nextName, previousName);
+    });
+    const fullText: string = [...hiddenClassTexts(old.shown, names, value), value].join('\n\n');
+    const full: ParseResultT = parseDiagram(fullText);
+    const updatedDiagram: Diagram | undefined = full.ok ? full.diagram : diagramFromModel(names, value);
+    if (!updatedDiagram) { document.current.validity = 'invalid'; setMessage('The updated class model is empty. Showing the last valid diagram.'); return; }
+    document.current = { shown: names, validity: 'valid' };
+    setVisible(names); setDiagram(updatedDiagram); setPartialRetention('discard'); setMessage('Diagram is up to date');
   })[0];
   function select(name: string, exclusive: boolean): void {
     if (document.current.validity === 'invalid') { setMessage('Correct the current text before changing the visible classes.'); return; }
-    let source: string = document.current.sources.get(name) ?? '';
-    if (!source) { const known: ClassDetails | undefined = knownClasses.find((item: ClassDetails) => item.name === name); source = known ? classDetailsToText(known) : name; document.current.sources.set(name, source); }
     const shown: string[] = exclusive ? [name] : document.current.shown.includes(name) ? document.current.shown.filter((item: string) => item !== name) : [...document.current.shown, name];
     document.current.shown = shown;
     setVisible(shown);
     setSelection((previous: { revision: number; text: string }) => ({
       revision: previous.revision + 1,
-      text: shown.map((item: string) => document.current.sources.get(item) ?? '').join('\n\n') }));
+      text: exclusive ? classText(name) : shown.map(classText).join('\n\n') }));
   }
-  return <section className="workspace"><section className="pane text-pane"><div className="pane-heading"><div><span className="eyebrow">SOURCE</span><h1>Text editor</h1></div><span className="file-badge">CLASS DIAGRAM</span></div><p className="hint">Describe your diagram here. Your canvas updates as you type.</p><Editor initialText={initialText} onChange={change} selection={selection} hiddenNames={hiddenNames} /><div className="status" aria-live="polite"><span className="dot" />{message}</div></section><section className="pane graph-pane"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Diagram canvas</h2></div><span className="file-badge">LIVE VIEW</span></div><p className="hint">A visual projection of your text.</p><Canvas diagram={diagram} knownClasses={knownClasses} partialRetention={partialRetention} visible={visible} onSelect={select} /></section></section>;
+  function editChain(rootName: string): void {
+    const classNames: readonly string[] = Model.current.getClassNames();
+    const visited: Set<string> = new Set<string>();
+    const ordered: string[] = [];
+    function visit(className: string): void {
+      if (visited.has(className)) return;
+      const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+      if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+      visited.add(className);
+      ordered.push(className);
+      const neighbors: Set<string> = new Set<string>(classModel.value.relations.map((relation) => relation.target));
+      classNames.forEach((candidateName: string) => {
+        const candidate: Result<ClassDetails, Error> = Model.current.tryGetModel(candidateName);
+        if (candidate.isOk() && candidate.value.relations.some((relation) => relation.target === className)) neighbors.add(candidateName);
+      });
+      neighbors.forEach(visit);
+    }
+    visit(rootName);
+    if (ordered.length === 0) return;
+    document.current = { shown: ordered, validity: 'valid' };
+    setVisible(ordered);
+    setMessage('Diagram is up to date');
+    setSelection((previous: { revision: number; text: string }) => ({
+      revision: previous.revision + 1,
+      text: ordered.map(classText).join('\n\n'),
+    }));
+  }
+  function updateEditorPercent(clientX: number): void {
+    // UNTRUST-ALLOW-NULLISH: The workspace ref is empty until its section mounts and may clear during unmount; ignore pointer input outside that mounted lifetime.
+    const bounds: DOMRect | undefined = workspaceElement.current?.getBoundingClientRect() ?? undefined;
+    if (!bounds) return;
+    const dividerWidth: number = 12;
+    const horizontalPadding: number = 44;
+    const availableWidth: number = bounds.width - horizontalPadding - dividerWidth;
+    const ratio: number = ((clientX - bounds.left - horizontalPadding / 2 - dividerWidth / 2) / availableWidth) * 100;
+    setEditorPercent(Math.max(20, Math.min(80, ratio)));
+  }
+  function beginPanelResize(event: React.PointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0) return;
+    splitterDragging.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+  function movePanelResize(event: React.PointerEvent<HTMLDivElement>): void {
+    if (splitterDragging.current) updateEditorPercent(event.clientX);
+  }
+  function endPanelResize(): void {
+    splitterDragging.current = false;
+  }
+  function resizeFromKeyboard(event: React.KeyboardEvent<HTMLDivElement>): void {
+    const amount: number = event.shiftKey ? 5 : 2;
+    if (event.key === 'ArrowLeft') setEditorPercent((previous: number) => Math.max(20, previous - amount));
+    else if (event.key === 'ArrowRight') setEditorPercent((previous: number) => Math.min(80, previous + amount));
+    else return;
+    event.preventDefault();
+  }
+  const workspaceStyle: React.CSSProperties = {
+    gridTemplateColumns: `minmax(0, ${editorPercent}fr) 12px minmax(0, ${100 - editorPercent}fr)`,
+  };
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__app = {
+      selectClass: (name: string) => {
+        if (Model.current.tryGetModel(name).isErr()) logAndThrow(new Error('Unknown class.'));
+        select(name, true);
+      },
+      getSelection: () => [...document.current.shown],
+      tryGetModel: (name: string) => Model.current.tryGetModel(name),
+    };
+    return () => { delete window.__app; };
+  });
+  useEffect(() => saveEditorPercent(editorPercent), [editorPercent]);
+  return (
+    <section
+      className="workspace workspace-resizable"
+      ref={workspaceElement}
+      style={workspaceStyle}
+    >
+      <section className="pane text-pane">
+        <div className="pane-heading pane-heading-trimmed">
+          <div className="pane-title-row">
+            <h1>Text editor</h1>
+            <p className="hint">Edit the DSL to update the diagram.</p>
+          </div>
+        </div>
+        <Editor
+          initialText={initialText}
+          onChange={change}
+          onGoToClass={(className: string) => setGraphFocus((previous: { className: string; revision: number }) => ({ className, revision: previous.revision + 1 }))}
+          selection={selection}
+          hiddenNames={hiddenNames}
+        />
+        <div className="status" aria-live="polite">
+          <span className="dot" />{message}
+        </div>
+      </section>
+      <div
+        className="panel-splitter"
+        role="separator"
+        aria-label="Resize text editor and diagram panels"
+        aria-orientation="vertical"
+        aria-valuemin={20}
+        aria-valuemax={80}
+        aria-valuenow={Math.round(editorPercent)}
+        tabIndex={0}
+        onPointerDown={beginPanelResize}
+        onPointerMove={movePanelResize}
+        onPointerUp={endPanelResize}
+        onPointerCancel={endPanelResize}
+        onLostPointerCapture={endPanelResize}
+        onKeyDown={resizeFromKeyboard}
+      />
+      <section className={diagramFullscreen ? 'pane graph-pane graph-pane-fullscreen' : 'pane graph-pane'}>
+        <div className="pane-heading pane-heading-trimmed graph-pane-heading">
+          <div className="pane-title-row">
+            <h2>Diagram canvas</h2>
+            <p className="hint">Updates as you edit.</p>
+          </div>
+          <button
+            type="button"
+            className="diagram-toggle"
+            aria-label={diagramFullscreen ? 'Exit full screen diagram' : 'Expand diagram to full screen'}
+            aria-pressed={diagramFullscreen}
+            onClick={() => setDiagramFullscreen((previous: boolean) => !previous)}
+          >
+            [ ]
+          </button>
+        </div>
+        <Canvas
+          diagram={diagram}
+          partialRetention={partialRetention}
+          visible={visible}
+          focusRequest={graphFocus}
+          onSelect={select}
+          onEditChain={editChain}
+        />
+      </section>
+    </section>
+  );
 }
 
 type LoadStateT = { status: 'loading' } | { status: 'error' } | {
   status: 'ready';
   text: string;
-  diagram: Diagram;
-  classes: readonly ClassDetails[] };
+  diagram: Diagram };
 type TestsLoadStateT = { status: 'loading' } | { status: 'error' } | { status: 'ready'; tests: readonly TestCaseDetails[] };
 type ModeT = 'classes' | 'tests';
 
-function Topbar({ mode, onModeChange }: { mode: ModeT; onModeChange: (mode: ModeT) => void }) {
-  return <header className="topbar"><div className="brand"><span className="mark">◇</span><strong>cod<span>AI</span>gram</strong></div><div className="subtitle">Think in text. See the structure.</div><nav className="mode-tabs" aria-label="Workspace mode"><button type="button" role="tab" aria-selected={mode === 'classes'} className={mode === 'classes' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('classes')}>Classes</button><button type="button" role="tab" aria-selected={mode === 'tests'} className={mode === 'tests' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('tests')}>Tests</button></nav><div className="badge">EARLY PREVIEW</div></header>;
+function Topbar({ mode, onModeChange, chatOpen, onChatToggle }: {
+  mode: ModeT;
+  onModeChange: (mode: ModeT) => void;
+  chatOpen: boolean;
+  onChatToggle: () => void;
+}) {
+  return <header className="topbar"><div className="brand"><span className="mark">◇</span><strong>cod<span>AI</span>gram</strong></div><div className="subtitle">Think in text. See the structure.</div><nav className="mode-tabs" aria-label="Workspace mode"><button type="button" role="tab" aria-selected={mode === 'classes'} className={mode === 'classes' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('classes')}>Classes</button><button type="button" role="tab" aria-selected={mode === 'tests'} className={mode === 'tests' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('tests')}>Tests</button></nav><div className="badge">EARLY PREVIEW</div><button type="button" className="chat-panel-toggle" aria-label="Toggle chat panel" aria-expanded={chatOpen} onClick={onChatToggle}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M4 14h16v6H4z" /><path d="M4 14h16" /></svg></button></header>;
+}
+
+function ChatPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <aside className="chat-panel" aria-label="Chat panel">
+      <div className="chat-panel-heading">
+        <h2>Chat</h2>
+        <button type="button" aria-label="Close chat panel" onClick={onClose}>x</button>
+      </div>
+      <div className="chat-transcript" role="log" aria-live="polite">
+        <p>Ask a question about the current diagram.</p>
+      </div>
+      <div className="chat-composer">
+        <label className="visually-hidden" htmlFor="chat-message">Message</label>
+        <textarea id="chat-message" aria-label="Message" placeholder="Write a message..." />
+        <button type="button" disabled>Send</button>
+      </div>
+    </aside>
+  );
 }
 
 function TestsWorkspace({ tests }: { tests: readonly TestCaseDetails[] }) {
@@ -439,25 +788,28 @@ function TestsWorkspace({ tests }: { tests: readonly TestCaseDetails[] }) {
     group.push(test);
     byGroup.set(test.group, group);
   });
-  return <section className="workspace"><section className="pane tests-pane"><div className="pane-heading"><div><span className="eyebrow">INVENTORY</span><h1>Tests</h1></div><span className="file-badge">{tests.length} CASES</span></div><p className="hint">Tests discovered from the project server source.</p><nav className="tests-tree" aria-label="Tests inventory"><ul className="tests-tree-root">{Array.from(byGroup.entries(), ([groupName, groupTests]: [string, TestCaseDetails[]]) => <li key={groupName} className="test-group"><span className="tree-group-label">{groupName}</span><ul>{groupTests.map((test: TestCaseDetails) => <li key={`${test.group}.${test.name}`} className="test-case"><span>{test.name}</span><small>{test.description}</small></li>)}</ul></li>)}</ul></nav></section><section className="pane graph-pane tests-preview"><div className="pane-heading"><div><span className="eyebrow">PREVIEW</span><h2>Test flow</h2></div><span className="file-badge">COMING LATER</span></div><div className="tests-placeholder">A sequence-diagram view will appear here.</div></section></section>;
+  return <section className="workspace"><section className="pane tests-pane"><div className="pane-heading"><div><span className="eyebrow">INVENTORY</span><h1>Tests</h1></div><span className="file-badge">{tests.length} CASES</span></div><p className="hint">Tests discovered from the project server source.</p><nav className="tests-tree" aria-label="Tests inventory"><ul className="tests-tree-root">{Array.from(byGroup.entries(), ([groupName, groupTests]: [string, TestCaseDetails[]]) => <li key={groupName} className="test-group"><span className="tree-group-label">{groupName}</span><ul>{groupTests.map((test: TestCaseDetails) => <li key={`${test.group}.${test.name}`} className="test-case"><span>{test.name}</span><small>{test.description}</small></li>)}</ul></li>)}</ul></nav></section><section className="pane graph-pane tests-preview"><div className="pane-heading"><h2>Test flow</h2><span className="file-badge">COMING LATER</span></div><div className="tests-placeholder">A sequence-diagram view will appear here.</div></section></section>;
 }
 function App() {
   const [state, setState]: [LoadStateT, React.Dispatch<React.SetStateAction<LoadStateT>>] = useState<LoadStateT>({ status: 'loading' });
   const [testsState, setTestsState]: [TestsLoadStateT, React.Dispatch<React.SetStateAction<TestsLoadStateT>>] = useState<TestsLoadStateT>({ status: 'loading' });
   const [mode, setMode]: [ModeT, React.Dispatch<React.SetStateAction<ModeT>>] = useState<ModeT>('classes');
+  const [chatOpen, setChatOpen]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
   useEffect(() => {
     const controller: AbortController = new AbortController();
-    loadClassDetails(controller.signal).then((details: ClassDetails[]) => {
+    loadClassDetails(controller.signal).then((inventory) => {
+      const details: ClassDetails[] = inventory.classes;
+      Model.current = new ClassWorkspaceModel();
+      Model.current.initClasses(details);
       // UNTRUST-ALLOW-NULLISH: The server can return an empty inventory, and Array.at returns undefined in that case; a non-empty inventory deliberately opens its first class without assuming a ClassDiagram declaration exists.
       const sourceClass: ClassDetails | undefined = details.at(0);
-      if (!sourceClass) { setState({ status: 'error' }); return; }
-      const text: string = classDetailsToText(sourceClass);
-      const parsed: ParseResultT = parseDiagram(text);
-      setState(parsed.ok ? {
+      const initial: Diagram | undefined = classDetailsToDiagramSet(details, inventory.memberChanges);
+      if (!sourceClass || !initial) { setState({ status: 'error' }); return; }
+      const text: string = Model.decompile(sourceClass);
+      setState({
         status: 'ready',
         text,
-        diagram: parsed.diagram,
-        classes: details.filter((item: ClassDetails) => item.name !== sourceClass.name) } : { status: 'error' });
+        diagram: initial });
     }).catch((error: unknown) => { console.error('Class details request failed', error); if (!controller.signal.aborted) setState({ status: 'error' }); });
     return () => controller.abort();
   }, []);
@@ -468,7 +820,7 @@ function App() {
     }).catch((error: unknown) => { console.error('Tests inventory request failed', error); if (!controller.signal.aborted) setTestsState({ status: 'error' }); });
     return () => controller.abort();
   }, []);
-  return <main><Topbar mode={mode} onModeChange={setMode} />{mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace initialText={state.text} initial={state.diagram} knownClasses={state.classes} /> : testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} />}</main>;
+  return <main><Topbar mode={mode} onModeChange={setMode} chatOpen={chatOpen} onChatToggle={() => setChatOpen((previous: boolean) => !previous)} />{mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace initialText={state.text} initial={state.diagram} /> : testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} />}{chatOpen ? <ChatPanel onClose={() => setChatOpen(false)} /> : ""}</main>;
 }
 
 // UNTRUST-ALLOW-NULLISH: The browser DOM API returns null when the mount element is absent; the following guard prevents passing an absent element to React and does not expose that value outside this boundary.

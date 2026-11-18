@@ -8,7 +8,7 @@ export interface ClassDetails {
         target: string;
         many: boolean;
     }[];
-    isPartial: boolean;
+    state?: 'partial' | 'deleted';
 }
 export interface ClassMember {
     name: string;

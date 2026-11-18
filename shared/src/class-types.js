@@ -1,7 +1,7 @@
 import { JsonMap } from '#shared/json-map';
 export function isClassDetails(value) {
     // UNTRUST-ALLOW-NULLISH: JSON and persisted boundaries may contain null, which must be excluded before checking the fixed fields of a candidate class-details value.
-    return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string' && 'isPartial' in value && typeof value.isPartial === 'boolean' && 'methods' in value && Array.isArray(value.methods) && value.methods.every(isClassMember) && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isClassRelation);
+    return typeof value === 'object' && value !== null && !('isPartial' in value) && (!('state' in value) || value.state === 'partial' || value.state === 'deleted') && 'name' in value && typeof value.name === 'string' && 'methods' in value && Array.isArray(value.methods) && value.methods.every(isClassMember) && 'relations' in value && Array.isArray(value.relations) && value.relations.every(isClassRelation);
 }
 export function isClassMember(value) {
     // UNTRUST-ALLOW-NULLISH: A class-member value arrives from JSON or persistence and may be null, so reject it before inspecting its required name and overload fields.
@@ -25,10 +25,9 @@ export function parseClassDetails(value, onInvalidInput) {
     if (!isClassDetails(value))
         return onInvalidInput(new Error('Invalid class details.'));
     const details = value;
-    return {
+    const result = {
         name: details.name,
         relations: details.relations,
-        isPartial: details.isPartial,
         methods: details.methods.map((member) => ({
             name: member.name,
             overloads: member.overloads.map((args) => args.map((field) => ({
@@ -37,6 +36,8 @@ export function parseClassDetails(value, onInvalidInput) {
             })))
         }))
     };
+    if (details.state) result.state = details.state;
+    return result;
 }
 function parseCompositeType(value, onInvalidInput) {
     if (typeof value === 'string')
