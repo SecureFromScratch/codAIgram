@@ -1,0 +1,73 @@
+﻿{
+  "name": "codaigram-bridge",
+  "displayName": "CodAIgram Bridge",
+  "description": "A local WebSocket bridge for CodAIgram.",
+  "version": "0.0.1",
+  "publisher": "codaigram",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codaigram-bridge.showConnectionUrl",
+    "onCommand:codaigram-bridge.copyConnectionUrl",
+    "onCommand:codaigram-bridge.regenerateToken"
+  ],
+  "main": "./test-dist/src/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "CodAIgram Bridge",
+      "properties": {
+        "codaigramBridge.trustedOrigins": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "HTTP or HTTPS origins allowed to connect to the CodAIgram Bridge WebSocket server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "codaigram-bridge.showConnectionUrl",
+        "title": "CodAIgram Bridge: Show Connection URL"
+      },
+      {
+        "command": "codaigram-bridge.copyConnectionUrl",
+        "title": "CodAIgram Bridge: Copy Connection URL"
+      },
+      {
+        "command": "codaigram-bridge.regenerateToken",
+        "title": "CodAIgram Bridge: Regenerate Connection Token"
+      }
+    ]
+  },
+  "scripts": {
+    "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json",
+    "compile": "npm run check:gates && npm run compile:typescript",
+    "compile:typescript": "tsc -p .",
+    "watch": "npm run check:gates && tsc -watch -p .",
+    "test:integration": "node ./test-dist/tests/runTest.js",
+    "test": "npm run compile && npm run test:integration"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "@types/ws": "^8.18.2",
+    "@untrust/buildgates": "file:../../BuildGates_ts",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^11.0.1",
+    "playwright-core": "^1.65.1",
+    "selfsigned": "^5.5.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  }
+}
+

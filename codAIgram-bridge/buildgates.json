@@ -1,0 +1,6 @@
+{
+  "minimumJustificationCharacters": 120,
+  "nullishJustificationMarker": "UNTRUST-ALLOW-NULLISH:",
+  "requireStrictNullChecks": true,
+  "requireExactOptionalPropertyTypes": true
+}

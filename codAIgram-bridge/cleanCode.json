@@ -1,0 +1,14 @@
+{
+  "interfaceFieldPerLine": true,
+  "requireQualifiedTypeofAlias": true,
+  "requireDefineTypesReturnTypeAlias": true,
+  "requireDefineTypesFieldAlias": true,
+  "disallowBareFlagName": true,
+  "disallowBooleanFields": true,
+  "requireTestCaseModules": true,
+  "requireTestsUnderTestDirectory": true,
+  "requireTestOnlyTypesInsideTests": true,
+  "requireTypeAliasSuffixT": true,
+  "requireTypeScriptSources": true,
+  "requireTestDirectoriesAdjacentToSource": true
+}
