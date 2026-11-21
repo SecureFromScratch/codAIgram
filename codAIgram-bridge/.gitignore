@@ -4,3 +4,5 @@ out/
 *.log
 .test-ca/ca-key.pem
 test-dist/
+*.vsix
+

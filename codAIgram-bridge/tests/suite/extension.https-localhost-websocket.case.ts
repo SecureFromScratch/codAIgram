@@ -1,3 +1,5 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
+import type { Browser, Page, CDPSession } from "playwright-core";
 import * as assert from "node:assert";
 import * as fs from "node:fs/promises";
 import * as http from "node:http";
@@ -10,7 +12,7 @@ import { fixedPort, trustedOrigin, request, rejectUpgrade, upgradeStatus, connec
 import type { BridgeApi, ConnectedWebSocket } from "./extension.helpers";
 import { supportsHttpsFixture } from "../httpsSupport";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "connects from a trusted HTTPS page to ws localhost",
   prompt: {
     availability: "unavailable",
@@ -24,19 +26,19 @@ export function registerHttpsLocalhostWebsocketCase(getApi: () => BridgeApi): vo
             if (!supportsHttpsFixture(process.platform)) {
                 this.skip();
             }
-            const api = getApi();
-            const browserPath = process.env.CODAIGRAM_BRIDGE_CHROMIUM_PATH;
-            const httpsUrl = process.env.CODAIGRAM_BRIDGE_HTTPS_URL;
+            const api: BridgeApi = getApi();
+            const browserPath: string | undefined = process.env.CODAIGRAM_BRIDGE_CHROMIUM_PATH;
+            const httpsUrl: string | undefined = process.env.CODAIGRAM_BRIDGE_HTTPS_URL;
             assert.ok(browserPath, "A Chromium browser path must be provided for the HTTPS browser test.");
             assert.ok(httpsUrl, "An HTTPS fixture URL must be provided for the browser test.");
 
-            const browser = await chromium.launch({ executablePath: browserPath, headless: true });
+            const browser: Browser = await chromium.launch({ executablePath: browserPath, headless: true });
             try {
-                const page = await browser.newPage();
+                const page: Page = await browser.newPage();
                 await page.goto(httpsUrl);
-                const message = await page.evaluate(({ port, token }) => new Promise<string>((resolve, reject) => {
-                    const socket = new WebSocket(`ws://localhost:${port}/${token}`);
-                    const timeout = setTimeout(() => {
+                const message: string = await page.evaluate(({ port, token }) => new Promise<string>((resolve, reject) => {
+                    const socket: WebSocket = new WebSocket(`ws://localhost:${port}/${token}`);
+                    const timeout: NodeJS.Timeout = setTimeout(() => {
                         socket.close();
                         reject(new Error("Timed out waiting for the localhost WebSocket from HTTPS."));
                     }, 5_000);
@@ -50,7 +52,7 @@ export function registerHttpsLocalhostWebsocketCase(getApi: () => BridgeApi): vo
                         reject(new Error("Browser blocked or rejected ws://localhost from HTTPS."));
                     }, { once: true });
                 }), { port: api.port, token: api.token });
-                assert.strictEqual(message, "Hello");
+                assert.deepStrictEqual(JSON.parse(message), { version: 1, type: "welcome" });
             } finally {
                 await browser.close();
             }

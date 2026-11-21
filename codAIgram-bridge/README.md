@@ -50,6 +50,14 @@ Development Host using `@vscode/test-electron`, tests WebSocket connection and
 HTTP fallback behavior, then verifies that the allocated port is released. A successful
 Mocha run reports four passing tests and exits with code 0.
 
+The test launcher deliberately passes `--disable-extensions` to the Electron host
+and supplies a temporary user-data and extensions directory. This prevents installed
+user extensions from changing the test environment. The bridge under development is
+then loaded explicitly through `extensionDevelopmentPath`; the banner saying that
+installed extensions are temporarily disabled is therefore expected and does not
+mean that the bridge extension is disabled. Tests always use the cached VS Code
+1.146.0 installation selected in `tests/runTest.ts`.
+
 The OS allocates the port atomically with `listen(0, "127.0.0.1")`; no random
 port selection, token persistence, or user-facing connection UI is implemented
 in this step.

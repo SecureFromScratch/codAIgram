@@ -1,3 +1,4 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
 import * as assert from "node:assert";
 import * as fs from "node:fs/promises";
 import * as http from "node:http";
@@ -9,7 +10,7 @@ import NodeWebSocket from "ws";
 import { fixedPort, trustedOrigin, request, rejectUpgrade, upgradeStatus, connectWebSocket, closeWebSocket, waitForFile } from "./extension.helpers";
 import type { BridgeApi, ConnectedWebSocket } from "./extension.helpers";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "allows one connection after failed auth and consumes the token permanently",
   prompt: {
     availability: "unavailable",
@@ -20,11 +21,11 @@ export const TEST_CASE_METADATA = {
 
 export function registerConsumeTokenAfterFailedAuthCase(getApi: () => BridgeApi): void {
     test(TEST_CASE_METADATA.title, async () => {
-            const api = getApi();
+            const api: BridgeApi = getApi();
             assert.strictEqual(await rejectUpgrade(api.port, "/incorrect-token"), 401);
-            const connection = await connectWebSocket(api.port, api.token);
+            const connection: ConnectedWebSocket = await connectWebSocket(api.port, api.token);
             try {
-                assert.strictEqual(await connection.firstMessage, "Hello");
+                assert.deepStrictEqual(JSON.parse(await connection.firstMessage), { version: 1, type: "welcome" });
                 connection.socket.send("Ping");
                 await Promise.resolve();
                 assert.strictEqual(connection.socket.readyState, NodeWebSocket.OPEN);

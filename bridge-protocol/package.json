@@ -1,0 +1,25 @@
+{
+  "name": "@codaigram/bridge-protocol",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/bridgeClient.d.ts",
+      "default": "./dist/bridgeClient.js"
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@untrust/mandate-core": "file:../../mandate/packages/core",
+    "@untrust/vv": "file:../../vv_ts/packages/vv",
+    "neverthrow": "^8.2.0"
+  }
+}

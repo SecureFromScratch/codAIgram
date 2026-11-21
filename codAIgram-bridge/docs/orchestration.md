@@ -11,7 +11,7 @@ The technical lead maintains project design and progress documentation, defines 
 3. Use the project-local VS Code 1.146.0 managed by @vscode/test-electron for integration tests.
 4. Require docs/step_summary_XX.md with changed files, tests, RED and GREEN commands and results, counts, and deviations.
 5. Read the summary. On success, accept the reported results without independently reviewing code, tests, or rerunning tests. Update implementation_progress.md and design documentation as needed.
-6. Continue with the next minimal step in the current phase. Request human approval before starting a new phase.
+6. Continue with the next minimal step in the approved phase. Request explicit human approval before starting a new phase.
 
 ## Failure handling
 

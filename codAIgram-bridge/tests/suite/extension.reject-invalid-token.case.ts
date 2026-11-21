@@ -1,3 +1,4 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
 import * as assert from "node:assert";
 import * as fs from "node:fs/promises";
 import * as http from "node:http";
@@ -9,7 +10,7 @@ import NodeWebSocket from "ws";
 import { fixedPort, trustedOrigin, request, rejectUpgrade, upgradeStatus, connectWebSocket, closeWebSocket, waitForFile } from "./extension.helpers";
 import type { BridgeApi, ConnectedWebSocket } from "./extension.helpers";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "rejects missing and invalid tokens with 401",
   prompt: {
     availability: "unavailable",
@@ -20,7 +21,7 @@ export const TEST_CASE_METADATA = {
 
 export function registerRejectInvalidTokenCase(getApi: () => BridgeApi): void {
     test(TEST_CASE_METADATA.title, async () => {
-            const api = getApi();
+            const api: BridgeApi = getApi();
             assert.strictEqual(await rejectUpgrade(api.port, "/"), 401);
             assert.strictEqual(await rejectUpgrade(api.port, "/incorrect-token"), 401);
         });

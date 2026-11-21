@@ -2,7 +2,7 @@
   "name": "codaigram-bridge",
   "displayName": "CodAIgram Bridge",
   "description": "A local WebSocket bridge for CodAIgram.",
-  "version": "0.0.1",
+  "version": "0.4.0",
   "publisher": "codaigram",
   "engines": {
     "vscode": "^1.95.0"
@@ -16,7 +16,7 @@
     "onCommand:codaigram-bridge.copyConnectionUrl",
     "onCommand:codaigram-bridge.regenerateToken"
   ],
-  "main": "./test-dist/src/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
       "title": "CodAIgram Bridge",
@@ -48,11 +48,14 @@
   },
   "scripts": {
     "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json",
-    "compile": "npm run check:gates && npm run compile:typescript",
-    "compile:typescript": "tsc -p .",
-    "watch": "npm run check:gates && tsc -watch -p .",
+    "compile": "npm run compile:protocol && npm run check:gates && npm run compile:typescript",
+    "compile:protocol": "npm --prefix ../bridge-protocol run compile",
+    "compile:typescript": "tsc -p . && npm run bundle:extension && npm run bundle:validator",
+    "bundle:extension": "esbuild ./test-dist/src/extension.js --bundle --platform=node --external:vscode --outfile=dist/extension.js",
+    "watch": "npm run check:gates && npm run bundle:validator && tsc -watch -p .",
     "test:integration": "node ./test-dist/tests/runTest.js",
-    "test": "npm run compile && npm run test:integration"
+    "test": "npm run compile && npm run test:integration",
+    "bundle:validator": "echo Protocol validation is compiled by bridge-protocol"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -67,6 +70,10 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@codaigram/bridge-protocol": "file:../bridge-protocol",
+    "@untrust/mandate-core": "file:../../mandate/packages/core",
+    "@untrust/vv": "file:../../vv_ts/packages/vv",
+    "esbuild": "^0.25.12",
     "neverthrow": "^8.2.0",
     "ws": "^8.23.0"
   }

@@ -1,0 +1,20 @@
+{
+  "name": "@codaigram/bridge-mock",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@codaigram/bridge-protocol": "file:../bridge-protocol",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.7.2"
+  }
+}

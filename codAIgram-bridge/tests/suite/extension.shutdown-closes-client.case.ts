@@ -1,3 +1,4 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
 import * as assert from "node:assert";
 import * as fs from "node:fs/promises";
 import * as http from "node:http";
@@ -9,7 +10,7 @@ import NodeWebSocket from "ws";
 import { fixedPort, trustedOrigin, request, rejectUpgrade, upgradeStatus, connectWebSocket, closeWebSocket, waitForFile } from "./extension.helpers";
 import type { BridgeApi, ConnectedWebSocket } from "./extension.helpers";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "closes the authenticated remote client during host shutdown",
   prompt: {
     availability: "unavailable",

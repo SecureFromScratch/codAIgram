@@ -1,0 +1,11 @@
+{
+  "authtoken": "test-token",
+  "workspaceFolders": [
+    { "name": "project", "uri": "file:///project", "index": 0 }
+  ],
+  "workspaceLastModified": 1730000000000,
+  "promptResponses": [
+    { "prompt": "What is here?", "response": "A test project." }
+  ],
+  "trustedOrigins": ["https://codai.example"]
+}

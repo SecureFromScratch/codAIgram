@@ -1,9 +1,10 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
 import * as assert from "node:assert";
 import { EventEmitter } from "node:events";
 import type * as http from "node:http";
 import { startLoopbackListener } from "../../src/listenerStartup";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "rejects startup when the HTTP listener cannot bind",
   prompt: {
     availability: "unavailable",
@@ -14,7 +15,7 @@ export const TEST_CASE_METADATA = {
 
 export function registerListenerStartupCase(): void {
     test(TEST_CASE_METADATA.title, async () => {
-        const server = new EventEmitter() as EventEmitter & Pick<http.Server, "listen" | "address">;
+        const server: EventEmitter & Pick<http.Server, "listen" | "address"> = new EventEmitter() as EventEmitter & Pick<http.Server, "listen" | "address">;
         // UNTRUST-ALLOW-NULLISH: Node Server.address returns null before a listener is bound; this fake deliberately reproduces that external API state while exercising startup failure.
         server.address = () => null;
         server.listen = (() => {

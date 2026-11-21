@@ -1,57 +1,103 @@
+import type { AddressInfo } from "node:net";
+import * as net from "node:net";
 import * as http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as vscode from "vscode";
 import { WebSocket, WebSocketServer } from "ws";
 import { ConnectionStatus } from "./connectionStatus";
 import { startLoopbackListener } from "./listenerStartup";
+import { PendingEditorWaits, scheduleEditorWaitTimeout, validateWorkspaceRequest, WorkspaceSyncState } from "@codaigram/bridge-protocol";
+import type { WorkspaceFolderInfo, WorkspaceSyncRequest } from "@codaigram/bridge-protocol";
 import { err, ok } from "neverthrow";
 import type { Result } from "neverthrow";
+import { CodexRuntime } from "./codexRuntime";
+import type { CodexRuntimeErrorT } from "./codexRuntime";
+import type { CodexNotification } from "./codexRpc";
 
-const host: "127.0.0.1" = "127.0.0.1";
+type HttpIncomingMessageT = typeof http.IncomingMessage;
+type HttpServerResponseT = typeof http.ServerResponse;
+type TokenStateT = "available" | "reserved" | "consumed";
+type SessionStateT = "available" | "active";
+
+const host: string = "127.0.0.1";
 
 let output: Result<vscode.OutputChannel, string> = err("Output channel is inactive");
 let server: Result<http.Server, string> = err("Server is inactive");
+let ipv6ProxyServer: Result<net.Server, string> = err("IPv6 listener is inactive");
 let webSocketServer: Result<WebSocketServer, string> = err("WebSocket server is inactive");
 let connectionStatus: Result<ConnectionStatus, string> = err("Status is inactive");
-const clients: Set<WebSocket> = new Set<WebSocket>();
+interface ClientState {
+    readonly editorSubscription: vscode.Disposable;
+    readonly pendingEditorWaits: PendingEditorWaits;
+    readonly pendingChats: Set<string>;
+}
+const clients: Map<WebSocket, ClientState> = new Map<WebSocket, ClientState>();
+const sessionStates: Map<string, SessionStateT> = new Map<string, SessionStateT>();
+const sessionIdByClient: Map<WebSocket, string> = new Map<WebSocket, string>();
+    const sessionClientById: Map<string, WebSocket> = new Map<string, WebSocket>();
+const workspaceSync: WorkspaceSyncState = new WorkspaceSyncState();
+
+function currentWorkspaceFolders(): readonly WorkspaceFolderInfo[] {
+    const configured: readonly vscode.WorkspaceFolder[] | undefined = vscode.workspace.workspaceFolders;
+    const folders: readonly vscode.WorkspaceFolder[] = configured ? configured : [];
+    return folders.map((folder, index) => ({ name: folder.name, uri: folder.uri.toString(), index }));
+}
 
 export interface CodAIgramBridgeApi {
     readonly port: number;
     readonly token: string;
+    readonly getWorkspaceFolders: () => readonly WorkspaceFolderInfo[];
+    readonly getWorkspaceSyncTimestamp: () => number;
+    readonly startCodex: () => Promise<Result<void, CodexRuntimeErrorT>>;
+    readonly stopCodex: () => Promise<boolean>;
+    readonly restartCodex: () => Promise<Result<void, CodexRuntimeErrorT>>;
 }
 
+let codexRuntime: CodexRuntime | undefined;
+
 export async function activate(context: vscode.ExtensionContext): Promise<CodAIgramBridgeApi> {
-    let token = randomBytes(32).toString("base64url");
-    let tokenState: "available" | "reserved" | "consumed" = "available";
-    const activeOutput = vscode.window.createOutputChannel("CodAIgram Bridge");
+    const activeCodexRuntime: CodexRuntime = new CodexRuntime();
+    codexRuntime = activeCodexRuntime;
+    let token: string = randomBytes(32).toString("base64url");
+    let tokenState: TokenStateT = "available";
+    const activeOutput: vscode.OutputChannel = vscode.window.createOutputChannel("CodAIgram Bridge");
     output = ok(activeOutput);
     activeOutput.appendLine("CodAIgram Bridge activating.");
-    const activeStatus = new ConnectionStatus(vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100));
+    const activeStatus: ConnectionStatus = new ConnectionStatus(vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100));
     connectionStatus = ok(activeStatus);
     context.subscriptions.push(activeStatus);
+    const workspaceSubscription: vscode.Disposable = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        const syncTimestamp: number = workspaceSync.changed();
+        clients.forEach((_state: ClientState, client: WebSocket) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ version: 1, type: "workspace_changed", syncTimestamp }));
+            }
+        });
+    });
+    context.subscriptions.push(workspaceSubscription);
 
     context.subscriptions.push(vscode.commands.registerCommand("codaigram-bridge.showConnectionUrl", async () => {
         if (server.isErr()) return;
-        const address = server.value.address();
+        const address: ReturnType<http.Server["address"]> = server.value.address();
         if (!address || typeof address === "string") {
             return;
         }
 
-        const connectionUrl = `http://localhost:${address.port}/${token}`;
-        const inputBox = vscode.window.createInputBox();
-        const copyButton = {
-            iconPath: new vscode.ThemeIcon("copy"),
-            tooltip: "Copy Connection URL"
+        const connectionUrl: string = `ws://localhost:${address.port}/${token}`;
+        const inputBox: vscode.InputBox = vscode.window.createInputBox();
+        const copyButton: vscode.QuickInputButton = {
+          iconPath: new vscode.ThemeIcon("copy"),
+          tooltip: "Copy Connection URL"
         };
         inputBox.title = "CodAIgram Bridge";
         inputBox.prompt = "Copy this URL into CodAIgram to connect to this VS Code window.";
         inputBox.value = connectionUrl;
         inputBox.ignoreFocusOut = true;
         inputBox.buttons = [copyButton];
-        const preventEditing = inputBox.onDidChangeValue(() => {
+        const preventEditing: vscode.Disposable = inputBox.onDidChangeValue(() => {
             inputBox.value = connectionUrl;
         });
-        const copyOnClick = inputBox.onDidTriggerButton(async (button) => {
+        const copyOnClick: vscode.Disposable = inputBox.onDidTriggerButton(async (button) => {
             if (button === copyButton) {
                 await vscode.commands.executeCommand("codaigram-bridge.copyConnectionUrl");
             }
@@ -66,13 +112,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
 
     context.subscriptions.push(vscode.commands.registerCommand("codaigram-bridge.copyConnectionUrl", async () => {
         if (server.isErr()) return;
-        const address = server.value.address();
+        const address: ReturnType<http.Server["address"]> = server.value.address();
         if (!address || typeof address === "string") {
             return;
         }
 
-        await vscode.env.clipboard.writeText(`http://localhost:${address.port}/${token}`);
+        const connectionUrl: string = `ws://localhost:${address.port}/${token}`;
+        await vscode.env.clipboard.writeText(connectionUrl);
         void vscode.window.showInformationMessage("CodAIgram Bridge connection URL copied.");
+        return connectionUrl;
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand("codaigram-bridge.regenerateToken", async () => {
@@ -86,7 +134,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         void vscode.window.showInformationMessage("CodAIgram Bridge connection token regenerated.");
     }));
 
-    const httpServer: http.Server<typeof http.IncomingMessage, typeof http.ServerResponse> = http.createServer((request, response) => {
+    const httpServer: http.Server<HttpIncomingMessageT, HttpServerResponseT> = http.createServer((request, response) => {
         if (request.method !== "GET") {
             response.writeHead(405);
             response.end("Method Not Allowed");
@@ -97,14 +145,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         response.end("Not Found");
     });
 
-    const wsServer: WebSocketServer = new WebSocketServer({ noServer: true });
+    const wsServer: WebSocketServer = new WebSocketServer({ noServer: true, maxPayload: 65_536 });
     webSocketServer = ok(wsServer);
     wsServer.on("connection", (client) => {
-        clients.add(client);
+        const sessionId: string | undefined = sessionIdByClient.get(client);
+        sessionIdByClient.delete(client);
+        const pendingEditorWaits: PendingEditorWaits = new PendingEditorWaits((id) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ version: 1, type: "error", id, code: "request_timeout" }));
+            }
+        }, scheduleEditorWaitTimeout);
+        const editorSubscription: vscode.Disposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+            if (client.readyState === WebSocket.OPEN) {
+                const hasActiveEditor: boolean = Boolean(editor);
+                const completedIds: string[] = pendingEditorWaits.takeAll();
+                client.send(JSON.stringify({
+                  version: 1,
+                  type: "active_editor_changed",
+                  hasActiveEditor
+                }));
+                completedIds.forEach((id) => {
+                    client.send(JSON.stringify({
+                      version: 1,
+                      type: "active_editor_change",
+                      id,
+                      hasActiveEditor
+                    }));
+                });
+            }
+        });
+        const state: ClientState = {
+          editorSubscription,
+          pendingEditorWaits,
+          pendingChats: new Set<string>()
+        };
+        clients.set(client, state);
         if (connectionStatus.isOk()) connectionStatus.value.connected();
         if (output.isOk()) output.value.appendLine("CodAIgram Bridge WebSocket client connected.");
         client.once("close", () => {
+            pendingEditorWaits.clear();
+            state.pendingChats.clear();
+            editorSubscription.dispose();
             clients.delete(client);
+            if (sessionId) sessionStates.set(sessionId, "available");
+            if (sessionId && sessionClientById.get(sessionId) === client) sessionClientById.delete(sessionId);
             if (connectionStatus.isOk()) connectionStatus.value.disconnected();
             if (clients.size === 0) {
                 token = randomBytes(32).toString("base64url");
@@ -115,107 +199,259 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         client.on("error", (error) => {
             if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket client error: ${error.message}`);
         });
-        client.send("Hello");
+        let messageQueue: Promise<void> = Promise.resolve();
+        client.on("message", (data, isBinary) => {
+            if (isBinary) return;
+            const message: string = data.toString();
+            messageQueue = messageQueue.then(() => validateWorkspaceRequest(message)).then((result) => {
+                if (result.isOk() && client.readyState === WebSocket.OPEN) {
+                    const request: WorkspaceSyncRequest = result.value;
+                    if (pendingEditorWaits.has(request.id)) {
+                        pendingEditorWaits.clear();
+                        client.close(1008);
+                    } else if (request.type === "ping") {
+                        client.send(JSON.stringify({ version: 1, type: "pong", id: request.id }));
+                    } else if (request.type === "workspace_folders") {
+                        client.send(JSON.stringify({
+                          version: 1,
+                          type: "workspace_folders",
+                          id: request.id,
+                          syncTimestamp: workspaceSync.currentTimestamp(),
+                          folders: currentWorkspaceFolders()
+                        }));
+                    } else if ((request.type === "chat" || request.type === "chat/ask") && request.syncTimestamp !== workspaceSync.currentTimestamp()) {
+                        client.send(JSON.stringify({
+                          version: 1,
+                          type: "error",
+                          id: request.id,
+                          code: "workspace_sync_required",
+                          syncTimestamp: workspaceSync.currentTimestamp(),
+                          required: ["workspace_folders"]
+                        }));
+                    } else if ((request.type === "chat" || request.type === "chat/ask") && typeof request.prompt === "string") {
+                        const state: ClientState | undefined = clients.get(client);
+                        if (state) {
+                            state.pendingChats.add(request.id);
+                            void handlePrompt(client, state, request.id, request.prompt, activeCodexRuntime);
+                        }
+                    } else if (request.type === "cancel" && typeof request.targetId === "string") {
+                        const targetId: string = request.targetId;
+                        const state: ClientState | undefined = clients.get(client);
+                        if (pendingEditorWaits.delete(targetId)) {
+                            client.send(JSON.stringify({ version: 1, type: "cancelled", id: request.id, targetId }));
+                            client.send(JSON.stringify({
+                              version: 1,
+                              type: "error",
+                              id: targetId,
+                              code: "request_cancelled"
+                            }));
+                        } else if (state && state.pendingChats.has(targetId)) {
+                            void activeCodexRuntime.cancel().then((cancelled) => {
+                                if (client.readyState !== WebSocket.OPEN) return;
+                                if (cancelled.isOk()) {
+                                    state.pendingChats.delete(targetId);
+                                    const cancelledMessage: object = { version: 1, type: "cancelled", id: request.id, targetId };
+                                    const completedMessage: object = {
+                                      version: 1,
+                                      type: "error",
+                                      id: targetId,
+                                      code: "request_cancelled"
+                                    };
+                                    client.send(JSON.stringify(cancelledMessage));
+                                    client.send(JSON.stringify(completedMessage));
+                                } else {
+                                    const failedCancellation: object = {
+                                      version: 1,
+                                      type: "error",
+                                      id: request.id,
+                                      code: "request_not_pending"
+                                    };
+                                    client.send(JSON.stringify(failedCancellation));
+                                }
+                            });
+                        } else {
+                            client.send(JSON.stringify({
+                              version: 1,
+                              type: "error",
+                              id: request.id,
+                              code: "request_not_pending"
+                            }));
+                        }
+                    } else if (request.type === "wait_for_active_editor_change") {
+                        if (pendingEditorWaits.size >= 32) {
+                            client.send(JSON.stringify({
+                              version: 1,
+                              type: "error",
+                              id: request.id,
+                              code: "too_many_pending_requests"
+                            }));
+                        } else {
+                            pendingEditorWaits.add(request.id);
+                        }
+                    } else {
+                        client.send(JSON.stringify({
+                          version: 1,
+                          type: "error",
+                          id: request.id,
+                          code: "unsupported_request"
+                        }));
+                    }
+                }
+            }).then(() => {}, (error: unknown) => logWarning(error));
+        });
+        client.send(JSON.stringify({ version: 1, type: "welcome" }));
+        if (sessionId) client.send(JSON.stringify({ version: 1, type: "session", sessionId }));
     });
     wsServer.on("error", (error) => {
         if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket server error: ${error.message}`);
     });
     httpServer.on("upgrade", (request, socket, head) => {
-        const rejectUnauthorized = (): void => {
+        const rejectUnauthorized: () => void = () => {
             if (output.isOk()) output.value.appendLine("CodAIgram Bridge rejected an unauthenticated WebSocket connection.");
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
             socket.destroy();
         };
-        const listeningAddress = httpServer.address();
+        const listeningAddress: ReturnType<http.Server["address"]> = httpServer.address();
         if (!listeningAddress || typeof listeningAddress === "string") {
             rejectUnauthorized();
             return;
         }
-        const expectedPort = listeningAddress.port;
-        const suppliedHost = request.headers.host;
+        const expectedPort: number = listeningAddress.port;
+        const suppliedHost: string | undefined = request.headers.host;
         if (typeof suppliedHost !== "string" ||
             (suppliedHost !== `localhost:${expectedPort}` && suppliedHost !== `127.0.0.1:${expectedPort}`)) {
             rejectUnauthorized();
             return;
         }
 
-        const suppliedOrigin = request.headers.origin;
+        const suppliedOrigin: string | undefined = request.headers.origin;
         const trustedOrigins: string[] = vscode.workspace.getConfiguration("codaigramBridge").get<string[]>("trustedOrigins", []);
         if (typeof suppliedOrigin !== "string" || !isAllowedOrigin(suppliedOrigin, trustedOrigins)) {
             rejectUnauthorized();
             return;
         }
 
-        let requestUrl: URL;
-        try {
-            requestUrl = new URL(request.url ?? "/", `ws://${host}`);
-        } catch {
+        if (!URL.canParse(request.url ?? "/", `ws://${host}`)) {
             rejectUnauthorized();
             return;
         }
-        const suppliedToken = requestUrl.pathname.startsWith("/") ? requestUrl.pathname.slice(1) : requestUrl.pathname;
+        const requestUrl: URL = new URL(request.url ?? "/", `ws://${host}`);
+        const suppliedToken: string = requestUrl.pathname.startsWith("/") ? requestUrl.pathname.slice(1) : requestUrl.pathname;
         const expected: Buffer<ArrayBuffer> = Buffer.from(token, "utf8");
         const supplied: Buffer<ArrayBuffer> = Buffer.from(suppliedToken, "utf8");
-        const tokenMatches = supplied.length === expected.length && timingSafeEqual(supplied, expected);
-        if (requestUrl.pathname !== `/${token}` || !tokenMatches || tokenState !== "available") {
+        const tokenMatches: boolean = supplied.length === expected.length && timingSafeEqual(supplied, expected);
+        const isNonceRoute: boolean = requestUrl.pathname === `/${token}` && tokenMatches && tokenState === "available";
+        const sessionPrefix: string = "/session/";
+        const suppliedSessionId: string = requestUrl.pathname.startsWith(sessionPrefix) ? requestUrl.pathname.slice(sessionPrefix.length) : "";
+        // UNTRUST-ALLOW-NULLISH: A missing session mapping means no prior socket exists; the explicit undefined
+        // value is required to distinguish an active session from a socket that has already begun closing.
+        const sessionClient: WebSocket | undefined = sessionClientById.get(suppliedSessionId);
+        // UNTRUST-ALLOW-NULLISH: The undefined check is an intentional lookup guard; only a mapped socket can prove that a session is reconnectable while its previous connection is closing, and no absent mapping may be dereferenced while validating an untrusted reconnect request.
+        const sessionDisconnected: boolean = sessionClient !== undefined && sessionClient.readyState !== WebSocket.OPEN;
+        // UNTRUST-ALLOW-NULLISH: The session-state lookup intentionally returns undefined for unknown credentials;
+        // that value is treated as a rejection and is never used as an object or identifier by the upgrade path.
+        const isSessionRoute: boolean = suppliedSessionId.length > 0 &&
+            (sessionStates.get(suppliedSessionId) === "available" || sessionDisconnected);
+        if (!isNonceRoute && !isSessionRoute) {
             rejectUnauthorized();
             return;
         }
 
-        tokenState = "reserved";
-        let upgradeCompleted = false;
+        const sessionId: string = isSessionRoute ? suppliedSessionId : randomBytes(32).toString("base64url");
+        sessionStates.set(sessionId, "active");
+        if (sessionDisconnected) sessionClientById.delete(sessionId);
+        if (isNonceRoute) tokenState = "reserved";
+        let upgradeCompleted: boolean = false;
         socket.once("close", () => {
-            if (!upgradeCompleted && tokenState === "reserved") {
-                tokenState = "available";
-            }
+            if (!upgradeCompleted && isNonceRoute && tokenState === "reserved") tokenState = "available";
+            if (!upgradeCompleted) sessionStates.set(sessionId, "available");
         });
         try {
             wsServer.handleUpgrade(request, socket, head, (client) => {
                 upgradeCompleted = true;
-                tokenState = "consumed";
+                if (isNonceRoute) tokenState = "consumed";
+                sessionIdByClient.set(client, sessionId);
+                sessionClientById.set(sessionId, client);
                 if (output.isOk()) output.value.appendLine("CodAIgram Bridge authenticated a WebSocket client.");
                 wsServer.emit("connection", client, request);
             });
         } catch (error: unknown) {
-            tokenState = "available";
-            const message = error instanceof Error ? error.message : String(error);
-            if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket upgrade failed: ${message}`);
+            logWarning(error);
+            if (isNonceRoute) tokenState = "available";
+            sessionStates.set(sessionId, "available");
             socket.destroy();
         }
     });
 
     server = ok(httpServer);
-    let listeningAddress;
+    let listeningAddress: AddressInfo;
     try {
         listeningAddress = await startLoopbackListener(httpServer);
+        const ipv6Proxy: net.Server = net.createServer((client) => {
+            const upstream: net.Socket = net.connect(listeningAddress.port, host);
+            client.on("error", () => upstream.destroy());
+            upstream.on("error", () => client.destroy());
+            client.pipe(upstream);
+            upstream.pipe(client);
+        });
+        await new Promise<void>((resolve, reject) => {
+            const onError: (error: Error) => void = (error) => {
+                ipv6Proxy.removeListener("listening", onListening);
+                reject(error);
+            };
+            const onListening: () => void = () => {
+                ipv6Proxy.removeListener("error", onError);
+                resolve();
+            };
+            ipv6Proxy.once("error", onError);
+            ipv6Proxy.once("listening", onListening);
+            ipv6Proxy.listen(listeningAddress.port, "::1");
+        });
+        ipv6ProxyServer = ok(ipv6Proxy);
     } catch (error: unknown) {
+        logWarning(error);
+        if (ipv6ProxyServer.isOk()) {
+            ipv6ProxyServer.value.close();
+            ipv6ProxyServer = err("IPv6 listener is inactive");
+        }
         server = err("Server is inactive");
         webSocketServer = err("WebSocket server is inactive");
         if (connectionStatus.isOk()) connectionStatus.value.dispose();
         connectionStatus = err("Status is inactive");
         wsServer.close();
-        if (output.isOk()) output.value.appendLine(`CodAIgram Bridge listener failed to start: ${error instanceof Error ? error.message : String(error)}`);
         if (output.isOk()) output.value.dispose();
         output = err("Output channel is inactive");
+        // UNTRUST-ALLOW-UNLOGGED-THROW: The caught listener failure was recorded without its potentially sensitive details above; rethrowing preserves activation failure for the host.
         throw error;
     }
 
     if (output.isOk()) output.value.appendLine(`CodAIgram Bridge listening on ws://${host}:${listeningAddress.port}`);
     return {
-        port: listeningAddress.port,
-        get token() {
+      port: listeningAddress.port,
+      get token() {
             return token;
-        }
+        },
+      getWorkspaceFolders: () => currentWorkspaceFolders(),
+      getWorkspaceSyncTimestamp: () => workspaceSync.currentTimestamp(),
+      startCodex: () => activeCodexRuntime.start({
+        name: "codaigram_bridge",
+        title: "CodAIgram Bridge",
+        version: "0.0.1"
+      }),
+      stopCodex: () => activeCodexRuntime.stop(),
+      restartCodex: () => activeCodexRuntime.restart({
+        name: "codaigram_bridge",
+        title: "CodAIgram Bridge",
+        version: "0.0.1"
+      })
     };
 }
 
 function isAllowedOrigin(suppliedOrigin: string, trustedOrigins: readonly string[]): boolean {
-    let parsedOrigin: URL;
-    try {
-        parsedOrigin = new URL(suppliedOrigin);
-    } catch {
+    if (!URL.canParse(suppliedOrigin)) {
         return false;
     }
+    const parsedOrigin: URL = new URL(suppliedOrigin);
     if ((parsedOrigin.protocol !== "http:" && parsedOrigin.protocol !== "https:") ||
         parsedOrigin.origin !== suppliedOrigin || parsedOrigin.username !== "" || parsedOrigin.password !== "") {
         return false;
@@ -223,23 +459,93 @@ function isAllowedOrigin(suppliedOrigin: string, trustedOrigins: readonly string
     return trustedOrigins.some((trustedOrigin) => trustedOrigin === suppliedOrigin);
 }
 
+function logWarning(error: unknown): void {
+    if (output.isOk()) {
+        output.value.appendLine(error instanceof Error ? "CodAIgram Bridge operation failed with an error." : "CodAIgram Bridge operation failed with a non-error value.");
+    }
+}
+
+async function handlePrompt(client: WebSocket, state: ClientState, id: string, prompt: string, runtime: CodexRuntime): Promise<void> {
+    const onDelta: (delta: string) => void = (delta) => {
+        const message: object = { version: 1, type: "chat_delta", id, delta };
+        if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(message));
+    };
+    const onEvent: (notification: CodexNotification) => void = (notification) => {
+        if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({
+          version: 1,
+          type: "chat_event",
+          id,
+          event: notification.method,
+          data: notification.params
+        }));
+    };
+    let response: Result<string, CodexRuntimeErrorT> = await runtime.ask(prompt, onDelta, onEvent);
+    if (response.isErr() && response.error === "not_running") {
+        const started: Result<void, CodexRuntimeErrorT> = await runtime.start({
+          name: "codaigram_bridge",
+          title: "CodAIgram Bridge",
+          version: "0.0.1"
+        });
+        if (started.isErr()) {
+            response = err(started.error);
+        } else {
+            response = await runtime.ask(prompt, onDelta, onEvent);
+        }
+    }
+    if (!state.pendingChats.has(id)) return;
+    state.pendingChats.delete(id);
+    if (client.readyState !== WebSocket.OPEN) return;
+    if (response.isOk()) {
+        client.send(JSON.stringify({
+          version: 1,
+          type: "chat_response",
+          id,
+          response: response.value
+        }));
+    } else {
+        client.send(JSON.stringify({
+          version: 1,
+          type: "error",
+          id,
+          code: "codex_request_failed"
+        }));
+    }
+}
+
 export async function deactivate(): Promise<void> {
+    const runtime: CodexRuntime | undefined = codexRuntime;
+    if (runtime) await runtime.stop();
+    // UNTRUST-ALLOW-NULLISH: Deactivation clears the extension-owned runtime after its stop promise has completed, preventing reuse after shutdown and ensuring later activation creates a fresh owner.
+    codexRuntime = undefined;
     if (connectionStatus.isOk()) connectionStatus.value.dispose();
     connectionStatus = err("Status is inactive");
-    const webSocketServerToClose = webSocketServer;
+    const webSocketServerToClose: Result<WebSocketServer, string> = webSocketServer;
     webSocketServer = err("WebSocket server is inactive");
-    for (const client of clients) {
+    clients.forEach((state, client) => {
+        state.pendingEditorWaits.clear();
+        state.editorSubscription.dispose();
         client.terminate();
-    }
+    });
     clients.clear();
+    sessionStates.clear();
+    sessionIdByClient.clear();
+    sessionClientById.clear();
     if (webSocketServerToClose.isOk()) {
         await new Promise<void>((resolve) => {
             webSocketServerToClose.value.close(() => resolve());
         });
     }
 
-    const serverToClose = server;
+    const serverToClose: Result<http.Server, string> = server;
     server = err("Server is inactive");
+
+    const ipv6ProxyToClose: Result<net.Server, string> = ipv6ProxyServer;
+    ipv6ProxyServer = err("IPv6 listener is inactive");
+    if (ipv6ProxyToClose.isOk()) {
+        await new Promise<void>((resolve) => {
+            ipv6ProxyToClose.value.close(() => resolve());
+        });
+    }
 
     if (serverToClose.isOk()) {
         await new Promise<void>((resolve) => {

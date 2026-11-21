@@ -1,7 +1,8 @@
+import type { TestCaseMetadata } from "../testCaseMetadata";
 import * as assert from "node:assert";
 import { supportsHttpsFixture } from "../httpsSupport";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "disables the certificate fixture on Linux while retaining it on Windows",
   prompt: {
     availability: "available",

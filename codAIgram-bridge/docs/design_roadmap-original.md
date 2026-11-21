@@ -4,7 +4,7 @@
 **Platform:** VS Code Extension  
 **Language:** TypeScript  
 **Development methodology:** Incremental Test-Driven Development (RED → GREEN)  
-**Current status:** Phase 1, Steps 1–4 implemented
+**Current status:** Phases 1 and 2 complete; execution order is defined by [`revised_implementation_roadmap.md`](revised_implementation_roadmap.md)
 
 ## 1. Project Overview
 
@@ -307,7 +307,7 @@ The parent must:
 
 Do not implement several steps in one delegation.
 
-Do not proceed to another step without user approval.
+Continue to the next minimal step within the approved phase without pausing for approval. Obtain explicit user approval before implementation begins in a new phase.
 
 ### 4.5 Phase Progression
 
@@ -318,10 +318,10 @@ After each completed step:
 1. Determine whether the phase's acceptance criteria are satisfied.
 2. If not, identify the next smallest missing capability in that phase.
 3. If yes, mark the phase complete.
-4. Begin the next phase by defining its smallest independently testable first step.
-5. Request user approval before implementation.
+4. Continue with the next minimal step when the phase is still in progress.
+5. When the phase is complete, define the next phase's smallest independently testable first step and request user approval before implementation.
 
-Do not automatically implement all remaining steps in a phase.
+Do not combine multiple steps into one implementation delegation.
 
 Phase boundaries are checkpoints, not invitations to make large changes.
 
@@ -602,17 +602,7 @@ The extension passes its integration and security tests, supports the intended b
 
 ## 6. Current Development Position
 
-**Current phase:** Phase 1 - Connection Foundation
-
-**Completed:** Steps 1, 2, 3, and 4.
-
-**Next task:** Define the next smallest Step 5 within Phase 1.
-
-The likely next capability is displaying the generated connection URL inside VS Code with a Copy button.
-
-However, inspect the current repository before finalizing the step definition.
-
-Do not begin Phase 2 until all Phase 1 completion criteria have been satisfied.
+**Current status:** Phases 1 and 2 are complete. Use `implementation_progress.md` for step evidence and `revised_implementation_roadmap.md` for the current phase order.
 
 ## 7. Parent Agent Operating Rules
 
@@ -628,7 +618,7 @@ These rules supplement the parent agent instructions already provided.
 8. Review both tests and production changes.
 9. Reject unrelated code changes.
 10. Report completed functionality and remaining phase requirements.
-11. Request user approval before starting the next step.
+11. Continue to the next minimal step within the approved phase.
 12. Continue defining minimal steps until the current phase is complete.
 13. After phase completion, start the next phase with its smallest testable step.
 14. Never implement an entire phase in one delegation.
@@ -674,13 +664,13 @@ The parent agent must report:
 - Smallest recommended next step.
 - Why it is independently testable.
 
-**Stop after reporting. Wait for explicit user approval before delegating the next implementation step.**
+**Continue after reporting while remaining in the approved phase. Wait for explicit user approval before delegating implementation in a new phase.**
 
 ## 9. Final Principle
 
 The project must progress through small, verified improvements:
 
-**Define one behavior → write tests → observe RED → implement minimum change → observe GREEN → review → request approval.**
+**Define one behavior → write tests → observe RED → implement minimum change → observe GREEN → review → report. Request approval only before moving to a new phase.**
 
 Repeat until the current phase is complete.
 
