@@ -30,12 +30,12 @@ export function registerRevisionUsageCase(): void {
     assert.equal(parseStoredClassSnapshot(second.current).modifiedAt, marked.modifiedAt);
     assert.deepEqual(parseStoredClassRevision({ origin, when: '2026-11-15T00:00:01Z', changes: second.changes }).changes, second.changes);
     const repository = new MemoryClassRepository([]);
-    await repository.updateClassSnapshots([initial], origin);
-    await repository.updateClassSnapshots([marked], origin);
-    assert.equal((await repository.getDetails(['Problem']))[0]?.usage, 'ex');
-    assert.equal((await repository.getDetails(['Problem']))[0]?.sourceFile, marked.sourceFile);
-    assert.equal((await repository.getClassHistory(['Problem']))[0]?.usage, 'ex');
-    await repository.updateClassSnapshots([initial], origin);
-    assert.equal((await repository.getDetails(['Problem']))[0]?.usage, undefined);
+    await repository.updateClassSnapshots("mock-project", [initial], origin);
+    await repository.updateClassSnapshots("mock-project", [marked], origin);
+    assert.equal((await repository.getDetails("mock-project", ['Problem']))[0]?.usage, 'ex');
+    assert.equal((await repository.getDetails("mock-project", ['Problem']))[0]?.sourceFile, marked.sourceFile);
+    assert.equal((await repository.getClassHistory("mock-project", ['Problem']))[0]?.usage, 'ex');
+    await repository.updateClassSnapshots("mock-project", [initial], origin);
+    assert.equal((await repository.getDetails("mock-project", ['Problem']))[0]?.usage, undefined);
   });
 }

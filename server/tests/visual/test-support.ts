@@ -52,24 +52,25 @@ class VisualMemoryRepository extends MemoryClassRepository {
   readonly #lastChange: DatabaseClassChange | undefined;
 
   constructor(classes: readonly ClassDetails[], lastChange?: DatabaseClassChange) {
-    super(classes);
+    super([]);
     this.#classOrder = classes.map((item: ClassDetails) => item.name);
     this.#lastChange = lastChange;
   }
 
-  override async getClasses(): Promise<ClassDetails[]> {
-    const classes: ClassDetails[] = await super.getClasses();
+  override async getClasses(projectName: string): Promise<ClassDetails[]> {
+    const classes: ClassDetails[] = await super.getClasses(projectName);
     return classes.sort((left: ClassDetails, right: ClassDetails) => this.#classOrder.indexOf(left.name) - this.#classOrder.indexOf(right.name));
   }
 
-  override async getLastClassChange(): Promise<DatabaseClassChange | undefined> {
-    return this.#lastChange;
+  override async getLastClassChange(projectName: string): Promise<DatabaseClassChange | undefined> {
+    return projectName === "mock-project" ? this.#lastChange : undefined;
   }
 }
 
 export async function setVisualClasses(classes: readonly ClassDetails[], lastChange?: DatabaseClassChange): Promise<void> {
   repository = new VisualMemoryRepository(classes, lastChange);
-  await repository.updateTests([
+  await repository.updateClasses("mock-project", classes);
+  await repository.updateTests("mock-project", [
     {
       group: "diagram",
       name: "renders-class",
@@ -81,20 +82,26 @@ export async function setVisualClasses(classes: readonly ClassDetails[], lastCha
       description: "stores class details",
       prompt: "Store class details." },
   ]);
+  const otherProjectClasses: readonly ClassDetails[] = [
+    { name: "AnotherProjectClass", methods: [], relations: [] },
+  ];
+  await repository.updateClasses("another", otherProjectClasses);
 }
 
 const visualRepository: ClassRepository & TestInventoryRepository = {
-  getDetails: (names) => repository.getDetails(names),
-  getClasses: () => repository.getClasses(),
-  updateClasses: (classes) => repository.updateClasses(classes),
-  getClassSnapshots: () => repository.getClassSnapshots(),
-  getClassHistory: (names) => repository.getClassHistory(names),
-  getRevisionIds: (howFarBack) => repository.getRevisionIds(howFarBack),
-  getLastClassChange: () => repository.getLastClassChange(),
-  updateClassSnapshots: (classes, origin) => repository.updateClassSnapshots(classes, origin),
-  getTests: () => repository.getTests(),
-  getHistory: (identifiers) => repository.getHistory(identifiers),
-  updateTests: (tests) => repository.updateTests(tests),
+  getProjects: () => repository.getProjects(),
+  createProject: (projectName) => repository.createProject(projectName),
+  getDetails: (projectName, names) => repository.getDetails(projectName, names),
+  getClasses: (projectName) => repository.getClasses(projectName),
+  updateClasses: (projectName, classes) => repository.updateClasses(projectName, classes),
+  getClassSnapshots: (projectName) => repository.getClassSnapshots(projectName),
+  getClassHistory: (projectName, names) => repository.getClassHistory(projectName, names),
+  getRevisionIds: (projectName, howFarBack) => repository.getRevisionIds(projectName, howFarBack),
+  getLastClassChange: (projectName) => repository.getLastClassChange(projectName),
+  updateClassSnapshots: (projectName, classes, origin) => repository.updateClassSnapshots(projectName, classes, origin),
+  getTests: (projectName) => repository.getTests(projectName),
+  getHistory: (projectName, identifiers) => repository.getHistory(projectName, identifiers),
+  updateTests: (projectName, tests) => repository.updateTests(projectName, tests),
 };
 
 export const VISUAL_FIXTURE_METADATA = {

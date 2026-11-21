@@ -50,7 +50,7 @@ export function registerPersistAndReadCase(): void {
         ) {
           const item: (typeof INITIAL_CLASSES)[number] =
             __itemValues[__itemIndex]!;
-          await new FirestoreClassRepository(database, collection).updateClasses([item]);
+          await new FirestoreClassRepository(database, collection).updateClasses("mock-project", [item]);
         }
       }
       const server: ReturnType<ReturnType<typeof createApp>["listen"]> =
@@ -64,7 +64,7 @@ export function registerPersistAndReadCase(): void {
         );
         const address: ReturnType<Server["address"]> = server.address();
         assert.ok(address && typeof address !== "string");
-        const base: string = `http://127.0.0.1:${String(address.port)}/api`;
+        const base: string = `http://127.0.0.1:${String(address.port)}/api/mock-project`;
         const changed: ClassDetails = {
           name: "Class",
           methods: [{ name: "inspect", overloads: [[]] }],

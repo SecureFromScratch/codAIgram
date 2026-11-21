@@ -44,13 +44,13 @@ const CATALOG: ClassDetails = {
 export function registerGetClassesCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const repository: MemoryClassRepository = new MemoryClassRepository();
-    await repository.updateClasses([CATALOG]);
+    await repository.updateClasses("mock-project", [CATALOG]);
     const server: ReturnType<ReturnType<typeof createApp>["listen"]> = createApp(repository).listen(0, "127.0.0.1");
     try {
       await new Promise<void>((resolve) => server.once("listening", resolve));
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
-      const response: Response = await loggedFetch(`http://127.0.0.1:${String(address.port)}/api/getClasses`);
+      const response: Response = await loggedFetch(`http://127.0.0.1:${String(address.port)}/api/mock-project/getClasses`);
       assert.equal(response.status, 200);
       const result: { classes: readonly ClassDetails[] } = await response.json() as { classes: readonly ClassDetails[] };
       const actual: readonly ClassDetails[] = result.classes;

@@ -52,6 +52,10 @@ export const INITIAL_CLASSES: readonly ClassDetails[] = [
 ];
 
 export class MemoryClassRepository implements ClassRepository, TestInventoryRepository {
+  readonly #initialClasses: readonly ClassDetails[];
+  readonly #projectRepositories: Map<string, MemoryClassRepository> = new Map<string, MemoryClassRepository>();
+  readonly #registeredProjectNames: Set<string> = new Set<string>();
+  readonly #repositoryScope: 'root' | 'project';
   readonly #classes: Map<string, ClassDetails>;
   readonly #classSnapshots: Map<string, CurrentClass> = new Map<string, CurrentClass>();
   readonly #classRevisions: Map<string, ClassRevision[]> = new Map<string, ClassRevision[]>();
@@ -60,10 +64,35 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
   readonly #renamedNames: Set<string> = new Set<string>();
   #lastClassChange: DatabaseClassChange | undefined;
   readonly #tests: Map<string, TestRecord> = new Map<string, TestRecord>();
-  constructor(initialClasses: readonly ClassDetails[] = INITIAL_CLASSES) {
-    this.#classes = new Map(initialClasses.map((item: ClassDetails) => [item.name, cloneClassDetails(item)]));
+  constructor(initialClasses: readonly ClassDetails[] = INITIAL_CLASSES, repositoryScope: 'root' | 'project' = 'root') {
+    this.#initialClasses = initialClasses.map(cloneClassDetails);
+    this.#repositoryScope = repositoryScope;
+    this.#classes = new Map(this.#initialClasses.map((item: ClassDetails) => [item.name, cloneClassDetails(item)]));
   }
-  async getDetails(names: readonly string[]): Promise<ClassDetails[]> {
+  private projectRepository(projectName: string, registerProject: boolean = false): MemoryClassRepository {
+    if (this.#repositoryScope === 'project') return this;
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(projectName)) return logAndThrow(new Error('Invalid project name.'));
+    if (registerProject) this.#registeredProjectNames.add(projectName);
+    let repository: MemoryClassRepository | undefined = this.#projectRepositories.get(projectName);
+    if (!repository) {
+      repository = new MemoryClassRepository(this.#initialClasses, 'project');
+      this.#projectRepositories.set(projectName, repository);
+    }
+    return repository;
+  }
+  async getProjects(): Promise<string[]> {
+    return Array.from(this.#registeredProjectNames).sort((left: string, right: string) => left.localeCompare(right));
+  }
+  async createProject(projectName: string): Promise<void> {
+    if (this.#repositoryScope === 'project') return;
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(projectName)) return logAndThrow(new Error('Invalid project name.'));
+    if (this.#registeredProjectNames.has(projectName)) return;
+    this.#registeredProjectNames.add(projectName);
+    this.#projectRepositories.set(projectName, new MemoryClassRepository([], 'project'));
+  }
+  async getDetails(projectName: string, names: readonly string[]): Promise<ClassDetails[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getDetails('local', names);
     const result: ClassDetails[] = [];
     names.forEach((name: string) => {
       const snapshot: CurrentClass | undefined = this.#classSnapshots.get(name);
@@ -93,13 +122,19 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
     });
     return result;
   }
-  async getClasses(): Promise<ClassDetails[]> {
+  async getClasses(projectName: string): Promise<ClassDetails[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getClasses('local');
     return Array.from(this.#classes.values()).filter((item: ClassDetails) => !this.#renamedNames.has(item.name)).map((item: ClassDetails) => cloneClassDetails(item)).sort((left: ClassDetails, right: ClassDetails) => left.name.localeCompare(right.name));
   }
-  async updateClasses(classes: readonly ClassDetails[]): Promise<void> {
+  async updateClasses(projectName: string, classes: readonly ClassDetails[]): Promise<void> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName, true);
+    if (repository !== this) return repository.updateClasses('local', classes);
     classes.forEach((item: ClassDetails) => { this.#classes.set(item.name, cloneClassDetails(item)); });
   }
-  async updateClassSnapshots(classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void> {
+  async updateClassSnapshots(projectName: string, classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName, true);
+    if (repository !== this) return repository.updateClassSnapshots('local', classes, origin);
     const staged: Map<string, RevisionResult> = new Map<string, RevisionResult>();
     const oldNames: Map<string, string> = new Map<string, string>();
     const baselines: Map<string, RevisionResult> = new Map<string, RevisionResult>();
@@ -198,17 +233,25 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
       };
     }
   }
-  async getLastClassChange(): Promise<DatabaseClassChange | undefined> {
+  async getLastClassChange(projectName: string): Promise<DatabaseClassChange | undefined> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getLastClassChange('local');
     // UNTRUST-ALLOW-NULLISH: A new repository has no recorded class update; the optional result lets the API omit lastChange until an actual change has occurred.
     return this.#lastClassChange ? structuredClone(this.#lastClassChange) : undefined;
   }
-  async getRevisionIds(howFarBack: number): Promise<string[]> {
+  async getRevisionIds(projectName: string, howFarBack: number): Promise<string[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getRevisionIds('local', howFarBack);
     return this.#revisionIds.slice(0, howFarBack + 1);
   }
-  async getClassSnapshots(): Promise<CurrentClass[]> {
+  async getClassSnapshots(projectName: string): Promise<CurrentClass[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getClassSnapshots('local');
     return Array.from(this.#classSnapshots.values(), (item: CurrentClass) => cloneClassSnapshot(item)).sort((left: CurrentClass, right: CurrentClass) => left.name.localeCompare(right.name));
   }
-  async getClassHistory(names: readonly string[]): Promise<ClassHistory[]> {
+  async getClassHistory(projectName: string, names: readonly string[]): Promise<ClassHistory[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getClassHistory('local', names);
     const result: ClassHistory[] = [];
     names.forEach((name: string) => {
       const current: CurrentClass | undefined = this.#classSnapshots.get(name);
@@ -217,10 +260,14 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
     });
     return JSON.parse(JSON.stringify(result)) as ClassHistory[];
   }
-  async getTests(): Promise<TestRecord[]> {
+  async getTests(projectName: string): Promise<TestRecord[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getTests('local');
     return Array.from(this.#tests.values(), (item: TestRecord) => structuredClone(item));
   }
-  async getHistory(identifiers: readonly TestIdentifier[]): Promise<TestHistory[]> {
+  async getHistory(projectName: string, identifiers: readonly TestIdentifier[]): Promise<TestHistory[]> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName);
+    if (repository !== this) return repository.getHistory('local', identifiers);
     const result: TestHistory[] = [];
     identifiers.forEach((item: TestIdentifier) => {
       const record: TestRecord | undefined = this.#tests.get(`${item.group}.${item.name}`);
@@ -228,7 +275,9 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
     });
     return result;
   }
-  async updateTests(tests: readonly TestDetails[]): Promise<void> {
+  async updateTests(projectName: string, tests: readonly TestDetails[]): Promise<void> {
+    const repository: MemoryClassRepository = this.projectRepository(projectName, true);
+    if (repository !== this) return repository.updateTests('local', tests);
     tests.forEach((item: TestDetails) => {
       const key: string = `${item.group}.${item.name}`;
       this.#tests.set(key, updateTestRecord(item, this.#tests.get(key)));

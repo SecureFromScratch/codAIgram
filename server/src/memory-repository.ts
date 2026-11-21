@@ -16,14 +16,16 @@ export interface DatabaseClassChange {
 
 export type { ArgsListT, ClassDetails, ClassMember, CompositeTypeT, FieldType } from '@codaigram/shared/class-types';
 export interface ClassRepository {
-  getDetails(names: readonly string[]): Promise<ClassDetails[]>;
-  getClasses(): Promise<ClassDetails[]>;
-  updateClasses(classes: readonly ClassDetails[]): Promise<void>;
-  getClassSnapshots(): Promise<CurrentClass[]>;
-  getClassHistory(names: readonly string[]): Promise<ClassHistory[]>;
-  getRevisionIds(howFarBack: number): Promise<string[]>;
-  getLastClassChange(): Promise<DatabaseClassChange | undefined>;
-  updateClassSnapshots(classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void>;
+  getProjects(): Promise<string[]>;
+  createProject(projectName: string): Promise<void>;
+  getDetails(projectName: string, names: readonly string[]): Promise<ClassDetails[]>;
+  getClasses(projectName: string): Promise<ClassDetails[]>;
+  updateClasses(projectName: string, classes: readonly ClassDetails[]): Promise<void>;
+  getClassSnapshots(projectName: string): Promise<CurrentClass[]>;
+  getClassHistory(projectName: string, names: readonly string[]): Promise<ClassHistory[]>;
+  getRevisionIds(projectName: string, howFarBack: number): Promise<string[]>;
+  getLastClassChange(projectName: string): Promise<DatabaseClassChange | undefined>;
+  updateClassSnapshots(projectName: string, classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void>;
 }
 
 export interface TestDetails {
@@ -56,7 +58,7 @@ export interface TestRecord extends TestDetails {
 }
 
 export interface TestInventoryRepository {
-  getTests(): Promise<TestRecord[]>;
-  getHistory(identifiers: readonly TestIdentifier[]): Promise<TestHistory[]>;
-  updateTests(tests: readonly TestDetails[]): Promise<void>;
+  getTests(projectName: string): Promise<TestRecord[]>;
+  getHistory(projectName: string, identifiers: readonly TestIdentifier[]): Promise<TestHistory[]>;
+  updateTests(projectName: string, tests: readonly TestDetails[]): Promise<void>;
 }

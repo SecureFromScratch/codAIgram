@@ -7,8 +7,8 @@ export interface TestCaseDetails {
   lastChangedAt: string;
 }
 
-export async function loadTestsInventory(signal: AbortSignal): Promise<TestCaseDetails[]> {
-  const response: Response = await loggedFetch('/api/getTests', { signal });
+export async function loadTestsInventory(signal: AbortSignal, projectName: string): Promise<TestCaseDetails[]> {
+  const response: Response = await loggedFetch(`/api/${encodeURIComponent(projectName)}/getTests`, { signal });
   if (!response.ok) logAndThrow(new Error('Could not load tests inventory.'));
   const data: unknown = await response.json();
   if (!Array.isArray(data) || !data.every(isTestCaseDetails)) logAndThrow(new Error('Invalid tests inventory response.'));

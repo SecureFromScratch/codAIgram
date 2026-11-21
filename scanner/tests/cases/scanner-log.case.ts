@@ -43,7 +43,7 @@ export function registerScannerLogCase(): void {
       assert.equal(networkFailure.status, 2);
       assert.match(String(networkFailure.stderr), /\*{4,}\r?\nScanner failed:[\s\S]*fetch failed[\s\S]*cause[\s\S]*\*{4,}/i);
       const networkLog: string = readFileSync(logPath, 'utf8');
-      assert.match(networkLog, /HTTP POST .* failed:[\s\S]*fetch failed[\s\S]*cause/i);
+      assert.match(networkLog, /HTTP GET .*\/api\/fixture\/getClasses failed:[\s\S]*fetch failed[\s\S]*cause/i);
       assert.match(networkLog, /ERROR \*{4,}\r?\nScanner failed:[\s\S]*\*{4,}/);
       const defaultRun: ReturnType<typeof spawnSync> = spawnSync(process.execPath, [cli, 'fixture', fixture], { cwd: directory, encoding: 'utf8' });
       assert.equal(defaultRun.status, 0, String(defaultRun.stderr));

@@ -95,7 +95,16 @@ export class ClassWorkspaceModel {
   markDeleted(className: string): void {
     const details: ClassDetails | undefined = this.#classes.get(className);
     if (!details || details.state === 'deleted') return;
-    this.updateClasses([{ ...details, state: 'deleted' }]);
+    const deleted: ClassDetails = {
+      name: details.name,
+      methods: details.methods,
+      relations: details.relations,
+      state: 'deleted',
+    };
+    if (details.usage) deleted.usage = details.usage;
+    if (details.sourceFile) deleted.sourceFile = details.sourceFile;
+    if (details.modifiedAt) deleted.modifiedAt = details.modifiedAt;
+    this.updateClasses([deleted]);
   }
 
   subscribe(classNames: readonly string[], callback: (change: ModelChangeT) => void): () => void {
@@ -139,9 +148,8 @@ export class ClassWorkspaceModel {
       target: relation.target,
       many: relation.multiplicity === 'many',
     }));
-    const value: ClassDetails = methods.length === 0 && relations.length === 0
-      ? { name: diagram.title, methods, relations, state: 'partial' }
-      : { name: diagram.title, methods, relations };
+    const value: ClassDetails = { name: diagram.title, methods, relations };
+    if (methods.length === 0 && relations.length === 0) value.state = 'partial';
     return isClassDetails(value) ? value : new Error('Parsed class is invalid.');
   }
 

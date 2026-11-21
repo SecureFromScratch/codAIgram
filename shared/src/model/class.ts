@@ -1,19 +1,17 @@
 import type { ClassDetails } from '../class-types.js';
 
-export type ScannedClass = ClassDetails & {
-  readonly declaration: 'CLASS' | 'INTERFACE';
-};
+export type ScannedClassT = ClassDetails & { readonly declaration: 'CLASS' | 'INTERFACE' };
 
-export type ScannedUnknownRelation = {
+export type ScannedUnknownRelationT = {
   readonly kind: 'UNK';
   readonly name: string;
   readonly target: string;
-  // UNTRUST-ALLOW-BOOLEAN: This preserves the existing class-details wire contract.
+  // UNTRUST-ALLOW-BOOLEAN: This preserves the existing public class-details wire contract; callers expect boolean multiplicity, so changing it would break compatibility across scanned and stored class data.
   readonly many: boolean;
-};
+}
 
-export type StoredScannedClass = {
+export type StoredScannedClassT = {
   name: string;
   sourceFile?: string;
   state?: 'partial' | 'deleted';
-};
+}

@@ -16,8 +16,8 @@ export type ClassInventoryT = {
   memberChanges: ClassMemberChangesT;
 };
 
-export async function loadClassDetails(signal: AbortSignal): Promise<ClassInventoryT> {
-  const response: Response = await loggedFetch('/api/getClasses', { signal });
+export async function loadClassDetails(signal: AbortSignal, projectName: string): Promise<ClassInventoryT> {
+  const response: Response = await loggedFetch(`/api/${encodeURIComponent(projectName)}/getClasses`, { signal });
   if (!response.ok) logAndThrow(new Error('Could not load class details.'));
   const data: unknown = await response.json();
   if (!data || typeof data !== 'object' || !('classes' in data) || !Array.isArray(data.classes) || !data.classes.every(isClassDetails)) logAndThrow(new Error('Invalid class details response.'));

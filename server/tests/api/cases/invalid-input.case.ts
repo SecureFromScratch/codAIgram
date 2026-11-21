@@ -34,7 +34,7 @@ export function registerInvalidInputCase(): void {
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
       const response: Response = await loggedFetch(
-        `http://127.0.0.1:${String(address.port)}/api/classesDetails`,
+        `http://127.0.0.1:${String(address.port)}/api/mock-project/classesDetails`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

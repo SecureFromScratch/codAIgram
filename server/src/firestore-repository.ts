@@ -85,9 +85,26 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
   readonly #database: Firestore;
   readonly #collection: string;
   constructor(database: Firestore, collection: string = 'classes') { this.#database = database; this.#collection = collection; }
-  async getDetails(names: readonly string[]): Promise<ClassDetails[]> {
-    const snapshots: DocumentSnapshot[] = await Promise.all(names.map((name: string) => this.#database.collection(this.#collection).doc(name).get()));
-    const currentSnapshots: DocumentSnapshot[] = await Promise.all(names.map((name: string) => this.#database.collection(`${this.#collection}_snapshots`).doc(name).get()));
+  #projectReference(projectName: string): DocumentReference {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(projectName)) return logAndThrow(new Error('Invalid project name.'));
+    return this.#database.collection('projects').doc(projectName);
+  }
+  #collectionForProject(projectName: string, name: string): FirebaseFirestore.CollectionReference {
+    return this.#projectReference(projectName).collection(name);
+  }
+  async getProjects(): Promise<string[]> {
+    const projectDocuments: DocumentReference[] = await this.#database.collection('projects').listDocuments();
+    return projectDocuments
+      .map((document: DocumentReference) => document.id)
+      .filter((projectName: string) => /^[A-Za-z0-9_-]{1,100}$/.test(projectName))
+      .sort((left: string, right: string) => left.localeCompare(right));
+  }
+  async createProject(projectName: string): Promise<void> {
+    await this.#projectReference(projectName).set({ name: projectName }, { merge: true });
+  }
+  async getDetails(projectName: string, names: readonly string[]): Promise<ClassDetails[]> {
+    const snapshots: DocumentSnapshot[] = await Promise.all(names.map((name: string) => this.#collectionForProject(projectName, this.#collection).doc(name).get()));
+    const currentSnapshots: DocumentSnapshot[] = await Promise.all(names.map((name: string) => this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(name).get()));
     const result: ClassDetails[] = [];
     snapshots.forEach((snapshot, index: number) => {
       const current: DocumentSnapshot = currentSnapshots[index]!;
@@ -127,22 +144,23 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
     return result;
   }
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
-  async getClasses(): Promise<ClassDetails[]> {
-    const snapshots: FirebaseFirestore.QueryDocumentSnapshot[] = (await this.#database.collection(this.#collection).orderBy('name').get()).docs;
-    const aliases: FirebaseFirestore.QuerySnapshot = await this.#database.collection(`${this.#collection}_snapshots`).where('renamedTo', '!=', '').get();
+  async getClasses(projectName: string): Promise<ClassDetails[]> {
+    const snapshots: FirebaseFirestore.QueryDocumentSnapshot[] = (await this.#collectionForProject(projectName, this.#collection).orderBy('name').get()).docs;
+    const aliases: FirebaseFirestore.QuerySnapshot = await this.#collectionForProject(projectName, `${this.#collection}_snapshots`).where('renamedTo', '!=', '').get();
     const renamedNames: Set<string> = new Set(aliases.docs.map((document: FirebaseFirestore.QueryDocumentSnapshot) => document.id));
     return snapshots.filter((snapshot: FirebaseFirestore.QueryDocumentSnapshot) => !renamedNames.has(snapshot.id)).map((snapshot: FirebaseFirestore.QueryDocumentSnapshot) => {
       const data: unknown = snapshot.data();
       return classDetailsFromStorage(data, snapshot.id);
     });
   }
-  async updateClasses(classes: readonly ClassDetails[]): Promise<void> {
+  async updateClasses(projectName: string, classes: readonly ClassDetails[]): Promise<void> {
     const batch: ReturnType<Firestore['batch']> = this.#database.batch();
-    classes.forEach((item: ClassDetails) => { batch.set(this.#database.collection(this.#collection).doc(item.name), classDetailsForStorage(item)); });
+    batch.set(this.#projectReference(projectName), { name: projectName }, { merge: true });
+    classes.forEach((item: ClassDetails) => { batch.set(this.#collectionForProject(projectName, this.#collection).doc(item.name), classDetailsForStorage(item)); });
     await batch.commit();
   }
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
-  async updateClassSnapshots(classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void> {
+  async updateClassSnapshots(projectName: string, classes: readonly ClassUpdate[], origin: ClassOrigin): Promise<void> {
     const unique: Set<string> = new Set<string>();
     classes.forEach((item: ClassUpdate) => {
       if (unique.has(item.name)) logAndThrow(new Error('Duplicate class name.'));
@@ -158,16 +176,16 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
     });
     await this.#database.runTransaction(async (transaction) => {
       const when: string = new Date().toISOString();
-      const lastChangeReference: DocumentReference = this.#database.collection(`${this.#collection}_metadata`).doc('last_class_change');
+      const lastChangeReference: DocumentReference = this.#collectionForProject(projectName, `${this.#collection}_metadata`).doc('last_class_change');
       await transaction.get(lastChangeReference);
-      const references: DocumentReference[] = classes.map((item: ClassUpdate) => this.#database.collection(`${this.#collection}_snapshots`).doc(item.name));
+      const references: DocumentReference[] = classes.map((item: ClassUpdate) => this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(item.name));
       const snapshots: DocumentSnapshot[] = await transaction.getAll(...references);
-      const sourceReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#database.collection(`${this.#collection}_snapshots`).doc(item.renameOf ?? item.name));
+      const sourceReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(item.renameOf ?? item.name));
       const sourceSnapshots: DocumentSnapshot[] = await transaction.getAll(...sourceReferences);
       // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
-      const legacyReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#database.collection(this.#collection).doc(item.name));
+      const legacyReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#collectionForProject(projectName, this.#collection).doc(item.name));
       const legacySnapshots: DocumentSnapshot[] = await transaction.getAll(...legacyReferences);
-      const sourceLegacyReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#database.collection(this.#collection).doc(item.renameOf ?? item.name));
+      const sourceLegacyReferences: DocumentReference[] = classes.map((item: ClassUpdate) => this.#collectionForProject(projectName, this.#collection).doc(item.renameOf ?? item.name));
       const sourceLegacySnapshots: DocumentSnapshot[] = await transaction.getAll(...sourceLegacyReferences);
       // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
       const baselines: Map<number, RevisionResult> = new Map<number, RevisionResult>();
@@ -212,14 +230,14 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
         if (nonCryptoGuid) baseline.current.nonCryptoGuid = nonCryptoGuid;
       });
       // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
-      const guidReferences: DocumentReference[] = newGuids.map((guid: string) => this.#database.collection(`${this.#collection}_class_guids`).doc(guid));
+      const guidReferences: DocumentReference[] = newGuids.map((guid: string) => this.#collectionForProject(projectName, `${this.#collection}_class_guids`).doc(guid));
       if (guidReferences.length > 0) {
         const existingGuids: DocumentSnapshot[] = await transaction.getAll(...guidReferences);
         if (existingGuids.some((snapshot: DocumentSnapshot) => snapshot.exists)) logAndThrow(new Error('Class identifier collision.'));
         guidReferences.forEach((reference: DocumentReference) => transaction.create(reference, { allocated: true }));
       }
       if (staged.some((result: RevisionResult, index: number) => result.changes.length > 0 || !sourceSnapshots[index]!.exists)) {
-        const revisionReference: DocumentReference = this.#database.collection(`${this.#collection}_revision_ids`).doc();
+        const revisionReference: DocumentReference = this.#collectionForProject(projectName, `${this.#collection}_revision_ids`).doc();
         transaction.set(revisionReference, { version: origin.version, when });
         const deltas: DatabaseClassDelta[] = staged.flatMap((result: RevisionResult, index: number) => {
           const existed: boolean = sourceSnapshots[index]!.exists || baselines.has(index);
@@ -257,7 +275,7 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
           if (baseline.current.nonCryptoGuid) baselineRevision.nonCryptoGuid = baseline.current.nonCryptoGuid;
           const cleanBaseline: FirebaseFirestore.DocumentData = JSON.parse(JSON.stringify(baselineRevision)) as FirebaseFirestore.DocumentData;
           ordinal += 1;
-          transaction.set(this.#database.collection(`${this.#collection}_snapshots`).doc(historyName).collection('revisions').doc(String(ordinal).padStart(12, '0')), { ordinal, value: cleanBaseline });
+          transaction.set(this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(historyName).collection('revisions').doc(String(ordinal).padStart(12, '0')), { ordinal, value: cleanBaseline });
         }
         // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
         if (result.changes.length === 0 && data) {
@@ -276,12 +294,13 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
           historyName,
         });
         if (classes[index]!.renameOf) transaction.set(sourceReferences[index]!, { renamedTo: result.current.name });
-        transaction.set(this.#database.collection(`${this.#collection}_snapshots`).doc(historyName).collection('revisions').doc(String(ordinal + 1).padStart(12, '0')), { ordinal: ordinal + 1, value: cleanRevision });
+        transaction.set(this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(historyName).collection('revisions').doc(String(ordinal + 1).padStart(12, '0')), { ordinal: ordinal + 1, value: cleanRevision });
       });
+      transaction.set(this.#projectReference(projectName), { name: projectName }, { merge: true });
     });
   }
-  async getLastClassChange(): Promise<DatabaseClassChange | undefined> {
-    const snapshot: DocumentSnapshot = await this.#database.collection(`${this.#collection}_metadata`).doc('last_class_change').get();
+  async getLastClassChange(projectName: string): Promise<DatabaseClassChange | undefined> {
+    const snapshot: DocumentSnapshot = await this.#collectionForProject(projectName, `${this.#collection}_metadata`).doc('last_class_change').get();
     // UNTRUST-ALLOW-NULLISH: A new or preexisting database may have no global change record; the optional return lets the API omit metadata until a tracked class update occurs.
     if (!snapshot.exists) return undefined;
     const data: FirebaseFirestore.DocumentData | undefined = snapshot.data();
@@ -314,27 +333,27 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
     }
     return result;
   }
-  async getRevisionIds(howFarBack: number): Promise<string[]> {
-    const snapshot: FirebaseFirestore.QuerySnapshot = await this.#database.collection(`${this.#collection}_revision_ids`).orderBy('when', 'desc').limit(howFarBack + 1).get();
+  async getRevisionIds(projectName: string, howFarBack: number): Promise<string[]> {
+    const snapshot: FirebaseFirestore.QuerySnapshot = await this.#collectionForProject(projectName, `${this.#collection}_revision_ids`).orderBy('when', 'desc').limit(howFarBack + 1).get();
     return snapshot.docs.map((document: FirebaseFirestore.QueryDocumentSnapshot) => {
       const data: FirebaseFirestore.DocumentData = document.data();
       if (typeof data.version !== 'string') return logAndThrow(new Error('Stored revision identifier is invalid.'));
       return data.version;
     });
   }
-  async getClassSnapshots(): Promise<CurrentClass[]> {
-    const snapshot: FirebaseFirestore.QuerySnapshot = await this.#database.collection(`${this.#collection}_snapshots`).get();
+  async getClassSnapshots(projectName: string): Promise<CurrentClass[]> {
+    const snapshot: FirebaseFirestore.QuerySnapshot = await this.#collectionForProject(projectName, `${this.#collection}_snapshots`).get();
     return snapshot.docs.filter((document: FirebaseFirestore.QueryDocumentSnapshot) => typeof document.data().renamedTo !== 'string').map((document: FirebaseFirestore.QueryDocumentSnapshot) => {
       const value: CurrentClass = parseStoredClassSnapshot(document.data().value, document.id);
       if (value.name !== document.id) logAndThrow(new Error('Stored class snapshot is invalid.'));
       return value;
     }).sort((left: CurrentClass, right: CurrentClass) => left.name.localeCompare(right.name));
   }
-  async getClassHistory(names: readonly string[]): Promise<ClassHistory[]> {
+  async getClassHistory(projectName: string, names: readonly string[]): Promise<ClassHistory[]> {
     const result: ClassHistory[] = [];
     for (let index: number = 0; index < names.length; index += 1) {
       const name: string = names[index]!;
-      const reference: DocumentReference = this.#database.collection(`${this.#collection}_snapshots`).doc(name);
+      const reference: DocumentReference = this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(name);
       const read: { found: false } | { found: true; value: ClassHistory } = await this.#database.runTransaction(async (transaction) => {
         const current: DocumentSnapshot = await transaction.get(reference);
         if (!current.exists) return { found: false as const };
@@ -343,7 +362,7 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
         if (!data || !Number.isSafeInteger(data.revisionCount) || data.revisionCount < 1) return logAndThrow(new Error('Stored class snapshot is invalid.'));
         const historyName: string = data.historyName ?? name;
         if (!/^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(historyName)) return logAndThrow(new Error('Stored class history location is invalid.'));
-        const revisions: FirebaseFirestore.QuerySnapshot = await transaction.get(this.#database.collection(`${this.#collection}_snapshots`).doc(historyName).collection('revisions').orderBy('ordinal'));
+        const revisions: FirebaseFirestore.QuerySnapshot = await transaction.get(this.#collectionForProject(projectName, `${this.#collection}_snapshots`).doc(historyName).collection('revisions').orderBy('ordinal'));
         if (revisions.size !== data.revisionCount) return logAndThrow(new StorageError(ERROR_CODES.CLASS_HISTORY_INCOMPLETE, 'Stored class history is incomplete.'));
         const value: CurrentClass = parseStoredClassSnapshot(data.value, current.id);
         if (value.name !== name) return logAndThrow(new Error('Stored class snapshot is invalid.'));
@@ -362,22 +381,22 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
     }
     return result;
   }
-  async getTests(): Promise<TestRecord[]> {
-    const snapshots: FirebaseFirestore.QueryDocumentSnapshot[] = (await this.#database.collection('tests').orderBy('createdAt').get()).docs;
+  async getTests(projectName: string): Promise<TestRecord[]> {
+    const snapshots: FirebaseFirestore.QueryDocumentSnapshot[] = (await this.#collectionForProject(projectName, 'tests').orderBy('createdAt').get()).docs;
     return snapshots.map((snapshot: FirebaseFirestore.QueryDocumentSnapshot) => {
       const data: unknown = snapshot.data();
       return storedTestRecord(data);
     });
   }
-  async getHistory(identifiers: readonly TestIdentifier[]): Promise<TestHistory[]> {
-    const snapshots: DocumentSnapshot[] = await Promise.all(identifiers.map((item: TestIdentifier) => this.#database.collection('tests').doc(`${item.group}.${item.name}`).get()));
+  async getHistory(projectName: string, identifiers: readonly TestIdentifier[]): Promise<TestHistory[]> {
+    const snapshots: DocumentSnapshot[] = await Promise.all(identifiers.map((item: TestIdentifier) => this.#collectionForProject(projectName, 'tests').doc(`${item.group}.${item.name}`).get()));
     const result: TestHistory[] = [];
     snapshots.forEach((snapshot: DocumentSnapshot) => { if (snapshot.exists) result.push(testRecordHistory(storedTestRecord(snapshot.data()))); });
     return result;
   }
-  async updateTests(tests: readonly TestDetails[]): Promise<void> {
+  async updateTests(projectName: string, tests: readonly TestDetails[]): Promise<void> {
     await this.#database.runTransaction(async (transaction) => {
-      const documents: DocumentReference[] = tests.map((item: TestDetails) => this.#database.collection('tests').doc(`${item.group}.${item.name}`));
+      const documents: DocumentReference[] = tests.map((item: TestDetails) => this.#collectionForProject(projectName, 'tests').doc(`${item.group}.${item.name}`));
       const snapshots: DocumentSnapshot[] = await transaction.getAll(...documents);
       tests.forEach((item: TestDetails, index: number) => {
         const snapshot: DocumentSnapshot = snapshots[index]!;
@@ -398,6 +417,7 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
           transaction.set(documents[index]!, data, { merge: true });
         }
       });
+      transaction.set(this.#projectReference(projectName), { name: projectName }, { merge: true });
     });
   }
 }

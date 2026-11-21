@@ -6,7 +6,7 @@ import type { ClassDtoT, OriginT } from '../support/class-history-support.js';
 import type { TestCaseMetadata } from '../../test-case-metadata.js';
 
 export const TEST_CASE_METADATA: TestCaseMetadata = {
-  title: 'getClasses reports the last class change across the database',
+  title: 'getClasses reports the latest class change within its project',
   prompt: {
     availability: 'available',
     history: [

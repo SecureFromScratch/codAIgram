@@ -65,12 +65,12 @@ export function registerUploadsMockProjectTestsCase(): void {
     const server = createApp(new MemoryClassRepository()).listen(5187, '127.0.0.1');
     try {
       await executeScanner(serverUrl);
-      const response: Response = await loggedFetch(`${serverUrl}/api/getTests`);
+      const response: Response = await loggedFetch(`${serverUrl}/api/mock-testproject/getTests`);
       assert.equal(response.status, 200);
       const actualTests: readonly { group: string; name: string; description: string; lastChangedAt: string }[] = await response.json() as readonly { group: string; name: string; description: string; lastChangedAt: string }[];
       assert.deepEqual(actualTests.map(({ group, name, description }) => ({ group, name, description })), EXPECTED_TESTS.map(({ group, name, description }) => ({ group, name, description })));
       actualTests.forEach((item) => { assert.ok(!('prompt' in item)); assert.ok(!Number.isNaN(Date.parse(item.lastChangedAt))); });
-      const historyResponse: Response = await loggedFetch(`${serverUrl}/api/getHistory`, {
+      const historyResponse: Response = await loggedFetch(`${serverUrl}/api/mock-testproject/getHistory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(EXPECTED_TESTS.map(({ group, name }) => ({ group, name }))),

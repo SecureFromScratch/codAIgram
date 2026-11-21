@@ -35,7 +35,7 @@ export function registerInitialTestsInventoryCase(): void {
       );
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
-      const baseUrl: string = `http://127.0.0.1:${String(address.port)}/api`;
+      const baseUrl: string = `http://127.0.0.1:${String(address.port)}/api/mock-project`;
       const tests: {
         group: string;
         name: string;

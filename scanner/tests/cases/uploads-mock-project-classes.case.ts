@@ -180,7 +180,7 @@ export function registerUploadsMockProjectClassesCase(): void {
       assert.match(output, /^  ACCESSOR count \+PROP: number$/m);
       assert.match(output, /^  RELATION UNK assignees: AssigneeContract\[\]$/m);
       assert.match(output, /^  FIELD relations \+RW: \{ kind: 'OWNS' \| 'REF' \| 'UNK'; name: string; target: string; many: boolean; \}\[\]$/m);
-      const response: Response = await loggedFetch(`${serverUrl}/api/classesDetails`, {
+      const response: Response = await loggedFetch(`${serverUrl}/api/mock-class-project/classesDetails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classNames: EXPECTED_DETAILS.map((detail: ClassDetails) => detail.name) }) });
@@ -193,7 +193,7 @@ export function registerUploadsMockProjectClassesCase(): void {
         delete item.modifiedAt;
       });
       assert.deepEqual(received, JSON.parse(JSON.stringify(EXPECTED_DETAILS)));
-      const allResponse: Response = await loggedFetch(`${serverUrl}/api/getClasses`);
+      const allResponse: Response = await loggedFetch(`${serverUrl}/api/mock-class-project/getClasses`);
       assert.equal(allResponse.status, 200);
       const firstInventory: {
         classes: readonly ClassDetails[];
@@ -207,7 +207,7 @@ export function registerUploadsMockProjectClassesCase(): void {
       assert.equal(actor.kind, 'scan');
       assert.equal(actor.name, os.userInfo().username);
       assert.ok(!Number.isNaN(Date.parse(actor.version)));
-      const revisions: Response = await loggedFetch(`${serverUrl}/api/getRevisionIds`, {
+      const revisions: Response = await loggedFetch(`${serverUrl}/api/mock-class-project/getRevisionIds`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ howFarBack: 0 }),
@@ -248,7 +248,7 @@ export function registerUploadsMockProjectClassesCase(): void {
             }[];
           }[];
         };
-      } = await (await loggedFetch(`${serverUrl}/api/getClasses`)).json() as {
+      } = await (await loggedFetch(`${serverUrl}/api/mock-class-project/getClasses`)).json() as {
         classes: ClassDetails[];
         lastChange: {
           classes: {
@@ -264,6 +264,8 @@ export function registerUploadsMockProjectClassesCase(): void {
       };
       const classDetails: ClassDetails | undefined = afterSecondScan.classes.find((candidate: ClassDetails) => candidate.name === 'ClassDetails');
       assert.ok(classDetails);
+      assert.equal(classDetails.sourceFile, 'src/class-details.ts');
+      assert.equal(classDetails.modifiedAt, statSync(path.resolve('scanner/mock-testproject2', 'src/class-details.ts')).mtime.toISOString());
       delete classDetails.sourceFile;
       delete classDetails.modifiedAt;
       assert.deepEqual(classDetails, SECOND_CLASS_DETAILS);
@@ -287,11 +289,11 @@ export function registerUploadsMockProjectClassesCase(): void {
         .sort() ?? [];
       assert.deepEqual(changedMembers, ['methods', 'relations', 'state', 'usage']);
       assert.ok(modified?.changes.some((change) => change.kind === 'relation'));
-      assert.ok(modified?.changes.some((change) => change.kind === 'source'));
+      assert.ok(!modified?.changes.some((change) => change.kind === 'source'));
       ['ClassMember', 'FieldType'].forEach((name: string) => {
         assert.equal(afterSecondScan.lastChange.classes.find((item) => item.name === name)?.status, 'deleted');
       });
-      const historyResponse: Response = await loggedFetch(`${serverUrl}/api/getClassesHistory`, {
+      const historyResponse: Response = await loggedFetch(`${serverUrl}/api/mock-class-project/getClassesHistory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classNames: ['ClassDetails', 'ClassMember', 'FieldType'] }),

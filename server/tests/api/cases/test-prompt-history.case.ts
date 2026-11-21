@@ -20,7 +20,7 @@ export function registerTestPromptHistoryCase(): void {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
-    const base: string = `http://127.0.0.1:${address.port}/api`;
+    const base: string = `http://127.0.0.1:${address.port}/api/mock-project`;
     const prompts = [
       { when: '2026/11/15 09:35', text: 'First original prompt.' },
       {

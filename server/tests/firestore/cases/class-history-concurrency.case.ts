@@ -30,24 +30,24 @@ export function registerClassHistoryConcurrencyCase(): void {
     });
     try {
       const repository: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-      await repository.updateClassSnapshots([snapshot('initial')], base);
+      await repository.updateClassSnapshots("mock-project", [snapshot('initial')], base);
       await Promise.all([
-        repository.updateClassSnapshots([snapshot('aliceEdit')], alice),
-        repository.updateClassSnapshots([snapshot('bobEdit')], bob),
+        repository.updateClassSnapshots("mock-project", [snapshot('aliceEdit')], alice),
+        repository.updateClassSnapshots("mock-project", [snapshot('bobEdit')], bob),
       ]);
-      const reference: FirebaseFirestore.DocumentReference = database.collection(`${collection}_snapshots`).doc('Notebook');
+      const reference: FirebaseFirestore.DocumentReference = database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook');
       const revisions: FirebaseFirestore.QuerySnapshot = await reference.collection('revisions').orderBy('ordinal').get();
       assert.equal(revisions.size, 3);
       assert.deepEqual(new Set(revisions.docs.map((item) => item.data().value.origin.name)), new Set(['scanner', 'alice', 'bob']));
-      const history: Awaited<ReturnType<FirestoreClassRepository['getClassHistory']>> = await repository.getClassHistory(['Notebook']);
+      const history: Awaited<ReturnType<FirestoreClassRepository['getClassHistory']>> = await repository.getClassHistory("mock-project", ['Notebook']);
       assert.ok(history[0]?.methods.some((item) => item.name === 'aliceEdit'));
       assert.ok(history[0]?.methods.some((item) => item.name === 'bobEdit'));
       assert.equal(history[0]?.methods.filter((item) => item.status === 'active').length, 1);
     } finally {
-      await database.recursiveDelete(database.collection(`${collection}_snapshots`));
-      await database.recursiveDelete(database.collection(`${collection}_metadata`));
-      await database.recursiveDelete(database.collection(`${collection}_revision_ids`));
-      await database.recursiveDelete(database.collection(`${collection}_class_guids`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_snapshots`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_metadata`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_revision_ids`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_class_guids`));
       await database.terminate();
     }
   });

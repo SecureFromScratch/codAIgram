@@ -64,12 +64,12 @@ export function registerUploadsMockProjectTestAndClassesCase(): void {
       assert.match(output, /^INTERFACE TaskContract$/m);
       assert.equal(output.match(/^CLASS Task$/gm)?.length, 1);
 
-      const testsResponse: Response = await loggedFetch(`${serverUrl}/api/getTests`);
+      const testsResponse: Response = await loggedFetch(`${serverUrl}/api/mock-combined-project/getTests`);
       assert.equal(testsResponse.status, 200);
       const inventory: readonly TestsInventoryItemT[] = await testsResponse.json() as readonly TestsInventoryItemT[];
       assert.ok(inventory.some((item: TestsInventoryItemT) => item.group === 'model' && item.name === 'initial-diagram'));
 
-      const classesResponse: Response = await loggedFetch(`${serverUrl}/api/classesDetails`, {
+      const classesResponse: Response = await loggedFetch(`${serverUrl}/api/mock-combined-project/classesDetails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classNames: ['Task', 'TaskContract'] })

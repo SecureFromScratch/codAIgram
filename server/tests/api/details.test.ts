@@ -5,6 +5,7 @@ import { registerInvalidInputCase } from "./cases/invalid-input.case.js";
 import { registerInvalidUpdateCase } from "./cases/invalid-update.case.js";
 import { registerOversizeUpdateCase } from "./cases/oversize-update.case.js";
 import { registerUpdateClassesCase } from "./cases/update-classes.case.js";
+import { registerProjectIsolationCase } from "./cases/project-isolation.case.js";
 describe("class details API", () => {
   registerClassDetailsCase();
   registerGetClassesCase();
@@ -12,4 +13,5 @@ describe("class details API", () => {
   registerInvalidUpdateCase();
   registerOversizeUpdateCase();
   registerInvalidInputCase();
+  registerProjectIsolationCase();
 });

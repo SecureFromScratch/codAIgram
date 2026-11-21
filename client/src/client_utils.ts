@@ -1,13 +1,19 @@
 import type { Result } from 'neverthrow';
 import type { ClassDetails } from '@codaigram/shared/class-types';
+import type { VscodeWorkspaceFolderT } from './vscode-bridge.js';
 
 declare global {
   interface Window {
     logAndThrow: (error: Error) => never;
     __app?: {
-      selectClass: (name: string) => void;
-      getSelection: () => readonly string[];
-      tryGetModel: (name: string) => Result<ClassDetails, Error>;
+      selectClass?: (name: string) => void;
+      getSelection?: () => readonly string[];
+      tryGetModel?: (name: string) => Result<ClassDetails, Error>;
+      isVscodeBridgeConnected?: () => boolean;
+      isVscodeBridgeConfigured?: () => boolean;
+      workspacesLastFetchTimestamp?: () => number;
+      connectToVscodeBridge?: (connectionLink: string) => Promise<void>;
+      getVscodeWorkspaces?: () => readonly VscodeWorkspaceFolderT[];
     };
   }
 }

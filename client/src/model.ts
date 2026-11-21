@@ -27,6 +27,7 @@ export type ParseResultT = { ok: true; diagram: Diagram } | {
   partialRetention?: 'retain' | 'discard' };
 
 const RELATION_KINDS: ReadonlySet<string> = new Set<string>(['OWNS', 'REF', 'UNK']);
+type PartialRetentionT = 'retain' | 'discard';
 
 function hasValidGenericBrackets(type: string): boolean {
   let depth: number = 0;
@@ -103,7 +104,7 @@ function parseClass(text: string): ParseResultT {
   const members: string[] = [];
   const targets: Relation[] = [];
   let relationError: string = '';
-  let partialRetention: 'retain' | 'discard' = 'discard';
+  let partialRetention: PartialRetentionT = 'discard';
   let relationshipsStarted: boolean = false;
   for (let index: number = 1; index < lines.length; index++) {
     const rawLine: string = lines.at(index) ?? '';

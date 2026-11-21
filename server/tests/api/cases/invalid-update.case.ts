@@ -34,7 +34,7 @@ export function registerInvalidUpdateCase(): void {
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
       const response: Response = await loggedFetch(
-        `http://127.0.0.1:${String(address.port)}/api/updateClasses`,
+        `http://127.0.0.1:${String(address.port)}/api/mock-project/updateClasses`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

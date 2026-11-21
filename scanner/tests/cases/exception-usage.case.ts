@@ -30,7 +30,7 @@ export function registerExceptionUsageCase(): void {
       assert.ok(address && typeof address !== 'string');
       const base: string = `http://127.0.0.1:${String(address.port)}`;
       await promisify(execFile)(process.execPath, [path.resolve('scanner/dist/index.js'), 'errors', path.resolve('scanner/mock-testproject'), '--types', 'class', '--server-url', base, '--logfile', path.join(directory, 'scanner.log')]);
-      const response: Response = await fetch(`${base}/api/classesDetails`, {
+      const response: Response = await fetch(`${base}/api/errors/classesDetails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classNames: ['ThrownError', 'LoggedError', 'VariableError', 'UnusedError', 'DerivedError', 'ThrownValue', 'OrdinaryClass'] }),

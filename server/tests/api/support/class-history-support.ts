@@ -80,7 +80,7 @@ export async function runWithServer(run: (base: string) => Promise<void>): Promi
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const address: ReturnType<Server['address']> = server.address();
   assert.ok(address && typeof address !== 'string');
-  try { await run(`http://127.0.0.1:${address.port}/api`); }
+  try { await run(`http://127.0.0.1:${address.port}/api/mock-project`); }
   finally { await new Promise<void>((resolve, reject) => server.close((error?: Error) => error ? reject(error) : resolve())); }
 }
 

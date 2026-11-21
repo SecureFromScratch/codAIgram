@@ -47,6 +47,17 @@ const classNameDefinition: ClassNameDefinitionT = {
 };
 const CLASS_NAME: ReturnType<typeof defineTypes<{ ClassName: ClassNameDefinitionT }>> = defineTypes({ ClassName: classNameDefinition });
 type ClassNameT = typeof CLASS_NAME.ClassName;
+const projectNameDefinition: ClassMethodDefinitionT = {
+  archetype: regexString({
+    normalize: (value: string) => value.trim(),
+    bounds: { minimum: 1, maximum: 100 },
+    pattern: /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
+    validateAdditional: noAdditionalValidation }),
+  disclosure: disclosures.public<string>(),
+};
+const PROJECT_NAME: ReturnType<typeof defineTypes<{ ProjectName: ClassMethodDefinitionT }>> = defineTypes({ ProjectName: projectNameDefinition });
+type ProjectNameT = typeof PROJECT_NAME.ProjectName;
+const PROJECT_PARAMS: ReturnType<typeof object<{ projectName: ProjectNameT }>> = object({ projectName: PROJECT_NAME.ProjectName });
 const testGroupDefinition: TestDefinitionT = {
   archetype: regexString({
     normalize: (value: string) => value.trim(),
@@ -461,7 +472,7 @@ type ErrorMiddlewareT = (
  * The current snapshot retains per-member provenance so `getClassesHistory`
  * can reconstruct the selected class's history.  `getClasses` is deliberately
  * an inventory endpoint: its class entries must remain the public ClassDetails
- * shape, while the one database-wide latest delta is exposed as `lastChange`.
+ * shape, while the one project-wide latest delta is exposed as `lastChange`.
  */
 function classDetailsFromCurrent(value: CurrentClass): ClassDetails {
   const result: ClassDetails = {
@@ -503,18 +514,30 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
   const app: ReturnType<typeof express> = express();
   app.use(express.json({ limit: '256kb' }));
   app.get('/health', {}, (_request, response) => { response.json({ status: 'ok' }); });
-  app.post('/api/classesDetails', {
+  app.get('/api/getProjects', {}, async (_request, response) => {
+    const projectNames: string[] = await repository.getProjects();
+    response.json(projectNames);
+  });
+  app.post('/api/createProject', { body: PROJECT_PARAMS }, async (request, response) => {
+    const projectName: string = request.body.projectName.exposeUnchecked();
+    await repository.createProject(projectName);
+    response.status(201).json({ projectName });
+  });
+  app.post('/api/:projectName/classesDetails', {
+    params: PROJECT_PARAMS,
     body: object({
       classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }) }) }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
     const names: string[] = request.body.classNames.map((className: InferValue<ClassNameT>) => className.exposeUnchecked());
-    const details: ClassDetails[] = await repository.getDetails(names);
+    const details: ClassDetails[] = await repository.getDetails(projectName, names);
     response.json(details);
   });
-  app.get('/api/getClasses', {}, async (_request, response) => {
-    const current: CurrentClass[] = await repository.getClassSnapshots();
+  app.get('/api/:projectName/getClasses', { params: PROJECT_PARAMS }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const current: CurrentClass[] = await repository.getClassSnapshots(projectName);
     const names: Set<string> = new Set(current.map((item: CurrentClass) => item.name));
     // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
-    const legacy: ClassDetails[] = (await repository.getClasses()).filter((item: ClassDetails) => !names.has(item.name));
+    const legacy: ClassDetails[] = (await repository.getClasses(projectName)).filter((item: ClassDetails) => !names.has(item.name));
     const exposed: ClassDetails[] = current.map(classDetailsFromCurrent);
     const result: {
       classes: ClassDetails[];
@@ -522,16 +545,18 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
     } = {
       classes: [...legacy, ...exposed].sort((left, right) => left.name.localeCompare(right.name)),
     };
-    const lastChange: DatabaseClassChange | undefined = await repository.getLastClassChange();
+    const lastChange: DatabaseClassChange | undefined = await repository.getLastClassChange(projectName);
     if (lastChange) result.lastChange = lastChange;
     response.json(result);
   });
-  app.post('/api/getClassesHistory', {
+  app.post('/api/:projectName/getClassesHistory', {
+    params: PROJECT_PARAMS,
     body: object({
       classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }),
     }),
   }, async (request, response) => {
-    const history: ClassHistory[] = await repository.getClassHistory(request.body.classNames.map((item) => item.exposeUnchecked()));
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const history: ClassHistory[] = await repository.getClassHistory(projectName, request.body.classNames.map((item) => item.exposeUnchecked()));
     response.json(history.map((item: ClassHistory) => {
       const result: {
         name: string;
@@ -551,11 +576,16 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
       return result;
     }));
   });
-  app.post('/api/getRevisionIds', { body: REVISION_REQUEST_TYPES.Request }, async (request, response) => {
+  app.post('/api/:projectName/getRevisionIds', {
+    params: PROJECT_PARAMS,
+    body: REVISION_REQUEST_TYPES.Request,
+  }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
     const input: RevisionRequestT = request.body.exposeUnchecked();
-    response.json(await repository.getRevisionIds(input.howFarBack));
+    response.json(await repository.getRevisionIds(projectName, input.howFarBack));
   });
-  app.post('/api/updateClasses', { body: CLASS_BATCH_VALUE }, async (request, response) => {
+  app.post('/api/:projectName/updateClasses', { params: PROJECT_PARAMS, body: CLASS_BATCH_VALUE }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
     logValueShape('Validated /api/updateClasses body shape', request.body);
     const batch: ClassBatchT = request.body.exposeUnchecked();
     if (new Set(batch.classes.map((item) => item.name)).size !== batch.classes.length) logAndThrow(new DuplicateClassError());
@@ -566,24 +596,27 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
         version: batch.origin.version,
       }
       : batch.origin;
-    await repository.updateClassSnapshots(batch.classes, origin);
+    await repository.updateClassSnapshots(projectName, batch.classes, origin);
     response.json({ updated: batch.classes.length });
   });
-  app.get('/api/getTests', {}, async (_request, response) => {
-    const tests: TestRecord[] = await repository.getTests();
+  app.get('/api/:projectName/getTests', { params: PROJECT_PARAMS }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const tests: TestRecord[] = await repository.getTests(projectName);
     response.json(tests.map((item: TestRecord) => TEST_SUMMARY_DTO.parse(item)));
   });
-  app.post('/api/getHistory', { body: TEST_HISTORY_REQUEST }, async (request, response) => {
+  app.post('/api/:projectName/getHistory', { params: PROJECT_PARAMS, body: TEST_HISTORY_REQUEST }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
     const identifiers: TestIdentifier[] = request.body.map((item) => ({
       group: item.group.exposeUnchecked(),
       name: item.name.exposeUnchecked(),
     }));
-    response.json((await repository.getHistory(identifiers)).map((item) => TEST_HISTORY_DTO.parse(item)));
+    response.json((await repository.getHistory(projectName, identifiers)).map((item) => TEST_HISTORY_DTO.parse(item)));
   });
-  app.post('/api/updateTests', { body: TEST_UPDATE_VALUE }, async (request, response) => {
+  app.post('/api/:projectName/updateTests', { params: PROJECT_PARAMS, body: TEST_UPDATE_VALUE }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
     const tests: TestDetails[] = request.body.exposeUnchecked();
     if (new Set(tests.map((item: TestDetails) => `${item.group}.${item.name}`)).size !== tests.length) logAndThrow(new DuplicateClassError());
-    await repository.updateTests(tests);
+    await repository.updateTests(projectName, tests);
     response.json({ updated: tests.length });
   });
   app.use(express.trustedMiddleware(logRequestError));

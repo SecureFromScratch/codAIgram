@@ -7,8 +7,14 @@ Mandate/VV boundary and persisted values are revalidated before use.
 
 ## Storage
 
-`classes_snapshots/{className}` is the current versioned snapshot for a class.
-Its `value` contains the current class state:
+Each project has a separate Firestore document namespace. For project
+`mock-project`, `projects/mock-project/classes_snapshots/{className}` is the
+current versioned snapshot for a class. Other projects use their own
+`projects/{projectName}` document and cannot read this project's collections.
+Each successful class or test write also creates or updates that project's
+root document. `GET /api/getProjects` returns the sorted names of registered
+projects, including projects with no class snapshots but a test inventory.
+The snapshot's `value` contains the current class state:
 
 ```text
 CurrentClass
@@ -51,7 +57,7 @@ data. They are not returned in `getClasses.classes`.
 
 Each snapshot document also holds `revisionCount` and, after a rename,
 `historyName`. Immutable revision documents live at
-`classes_snapshots/{historyName}/revisions/{zero-padded ordinal}`:
+`projects/{projectName}/classes_snapshots/{historyName}/revisions/{zero-padded ordinal}`:
 
 ```text
 ClassRevision
@@ -75,16 +81,17 @@ Refreshing only `modifiedAt` updates the current snapshot but is not a semantic 
 revision, does not alter `lastChange`, and is absent from `getClassesHistory`. This preserves the
 timestamp for a future git-status-like view without showing an unchanged class as modified.
 
-`classes_metadata/last_class_change` is the one database-wide latest class
-change. It stores `origin`, Firestore server `changedAt`, and its complete list
-of changed class deltas. `classes_revision_ids` stores version-tag/time pairs
-for revision-ID lookups. `classes_class_guids` reserves generated class IDs to
+`projects/{projectName}/classes_metadata/last_class_change` is the one
+project-wide latest class change. It stores `origin`, Firestore server
+`changedAt`, and its complete list of changed class deltas.
+`projects/{projectName}/classes_revision_ids` stores version-tag/time pairs for
+revision-ID lookups. `projects/{projectName}/classes_class_guids` reserves generated class IDs to
 detect collisions. The older `classes` collection is legacy compatibility
 storage; it does not contain reconstructed history.
 
-## `GET /api/getClasses`
+## `GET /api/{projectName}/getClasses`
 
-The response is deliberately an inventory plus the most recent database-wide
+The response is deliberately an inventory plus the most recent project-wide
 change. A class entry has no origin, `changedAt`, revision ordinal, or deleted
 member history.
 
@@ -119,7 +126,21 @@ LatestClassDelta
 and any test-inventory update leave it unchanged. It contains all changes in
 the latest batch, not a filtered subset.
 
-## `POST /api/getClassesHistory`
+All project names are validated path parameters and are passed to repository
+methods as their first argument. Other class routes use the same prefix:
+`POST /api/{projectName}/classesDetails`,
+`POST /api/{projectName}/getClassesHistory`,
+`POST /api/{projectName}/getRevisionIds`, and
+`POST /api/{projectName}/updateClasses`. Test-inventory routes are scoped the
+same way. The scanner uses its CLI project name as the path parameter.
+
+`POST /api/createProject` accepts `{ projectName }` and registers an empty
+project. The UI selects the created project after success; its initial
+`getClasses` response has an empty `classes` array, so the editor and diagram
+start empty. Project names use the same 1–100 character alphanumeric, underscore,
+and hyphen validation as other project APIs.
+
+## `POST /api/{projectName}/getClassesHistory`
 
 Request:
 

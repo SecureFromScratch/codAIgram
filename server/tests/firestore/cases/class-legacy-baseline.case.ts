@@ -29,39 +29,39 @@ export function registerClassLegacyBaselineCase(): void {
         for (const name of ['Original', 'Obsolete']) {
           const nonCryptoGuid: string | undefined = ids.get(name);
           assert.ok(nonCryptoGuid);
-          await database.collection(collection).doc(name).set({
+          await database.collection(`projects/mock-project/${collection}`).doc(name).set({
             name,
             methods: [{ name: 'find', overloads: [{ args: [{ arg: 'name', t: 'string' }] }] }],
             relations: [],
             nonCryptoGuid,
           });
-          await database.collection(`${collection}_class_guids`).doc(nonCryptoGuid).set({ allocated: true });
+          await database.collection(`projects/mock-project/${collection}_class_guids`).doc(nonCryptoGuid).set({ allocated: true });
         }
         const repository: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-        await repository.updateClassSnapshots([{
+        await repository.updateClassSnapshots("mock-project", [{
           name: 'Renamed',
           renameOf: 'Original',
           methods: [{ name: 'find', overloads: [{ args: [{ arg: 'name', t: 'string' }] }] }],
           relations: [],
         }], origin);
-        await repository.updateClassSnapshots([{ name: 'Obsolete', state: 'deleted', methods: [], relations: [] }], origin);
+        await repository.updateClassSnapshots("mock-project", [{ name: 'Obsolete', state: 'deleted', methods: [], relations: [] }], origin);
         const reopened: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-        assert.deepEqual((await reopened.getClasses()).map((item) => item.name), ['Obsolete']);
-        assert.deepEqual((await reopened.getClassSnapshots()).map((item) => item.name), ['Obsolete', 'Renamed']);
-        assert.equal((await reopened.getClassSnapshots()).find((item) => item.name === 'Renamed')?.nonCryptoGuid, ids.get('Original'));
-        assert.equal((await reopened.getClassSnapshots()).find((item) => item.name === 'Obsolete')?.nonCryptoGuid, ids.get('Obsolete'));
-        const history = await reopened.getClassHistory(['Renamed', 'Obsolete']);
+        assert.deepEqual((await reopened.getClasses("mock-project")).map((item) => item.name), ['Obsolete']);
+        assert.deepEqual((await reopened.getClassSnapshots("mock-project")).map((item) => item.name), ['Obsolete', 'Renamed']);
+        assert.equal((await reopened.getClassSnapshots("mock-project")).find((item) => item.name === 'Renamed')?.nonCryptoGuid, ids.get('Original'));
+        assert.equal((await reopened.getClassSnapshots("mock-project")).find((item) => item.name === 'Obsolete')?.nonCryptoGuid, ids.get('Obsolete'));
+        const history = await reopened.getClassHistory("mock-project", ['Renamed', 'Obsolete']);
         assert.equal(history[0]?.methods[0]?.history[0]?.origin.kind, 'legacy');
         assert.equal(history[0]?.methods[0]?.history[0]?.origin.name, 'unknown');
         assert.deepEqual(history[0]?.renames.map((item) => [item.from, item.to]), [['Original', 'Renamed']]);
         assert.equal(history[1]?.methods[0]?.status, 'deleted');
         assert.deepEqual(history[1]?.methods[0]?.history.map((item) => item.origin.kind), ['legacy', 'user']);
       } finally {
-        await database.recursiveDelete(database.collection(collection));
-        await database.recursiveDelete(database.collection(`${collection}_snapshots`));
-        await database.recursiveDelete(database.collection(`${collection}_metadata`));
-        await database.recursiveDelete(database.collection(`${collection}_revision_ids`));
-        await database.recursiveDelete(database.collection(`${collection}_class_guids`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_snapshots`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_metadata`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_revision_ids`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_class_guids`));
         await database.terminate();
       }
     });

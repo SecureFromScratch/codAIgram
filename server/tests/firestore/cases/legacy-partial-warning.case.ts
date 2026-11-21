@@ -23,19 +23,19 @@ export function registerLegacyPartialWarningCase(): void {
     const legacyName: string = `Legacy_${suffix}`;
     const snapshotName: string = `Snapshot_${suffix}`;
     try {
-      await database.collection(collection).doc(legacyName).set({
+      await database.collection(`projects/mock-project/${collection}`).doc(legacyName).set({
         name: legacyName,
         methods: [],
         relations: [],
         isPartial: false,
       });
-      await database.collection(`${collection}_snapshots`).doc(snapshotName).set({
+      await database.collection(`projects/mock-project/${collection}_snapshots`).doc(snapshotName).set({
         value: { name: snapshotName, methods: [], relations: [], isPartial: true },
         revisionCount: 1,
       });
       const repository: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-      const legacy = await repository.getClasses();
-      const snapshots = await repository.getClassSnapshots();
+      const legacy = await repository.getClasses("mock-project");
+      const snapshots = await repository.getClassSnapshots("mock-project");
       assert.equal(legacy[0]?.state, undefined);
       assert.equal(snapshots[0]?.state, 'partial');
       const lines: string[] = readFileSync(path.resolve('logs/server.log'), 'utf8').trim().split('\n');
@@ -44,8 +44,8 @@ export function registerLegacyPartialWarningCase(): void {
         assert.ok(entries.some((entry) => entry.level === 'WARN' && entry.message.includes('Legacy isPartial field') && entry.message.includes(name)));
       }
     } finally {
-      await database.recursiveDelete(database.collection(collection));
-      await database.recursiveDelete(database.collection(`${collection}_snapshots`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}`));
+      await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_snapshots`));
       await database.terminate();
     }
   });

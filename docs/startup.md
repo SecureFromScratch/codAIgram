@@ -19,9 +19,11 @@ npm run verify
 
 Ordinary `npm install` can remove the locally staged VV and Mandate packages; run `npm run bootstrap` again afterwards. The build runs TypeScript, the TypeScript and React build gates, a second TypeScript build, and the client bundle. `verify` also runs unit, API, and browser tests.
 
-Root `npm install` also links the `@codaigram/shared` workspace package used by
-the scanner, server, and client. Build the TypeScript solution before starting
-those programs so that `shared/dist` contains the package's JavaScript files.
+Root `npm install` links the `@codaigram/shared` and `@codaigram/bridge-protocol`
+workspace packages. Build the TypeScript solution before starting those
+programs so their `dist` folders contain the package JavaScript and declarations.
+The root build and `npm run dev:client` compile the bridge protocol before the
+client uses its API.
 
 ## Persistent interactive workbench
 
@@ -108,12 +110,12 @@ Stop each process with Ctrl+C in its terminal. Do not stop an emulator or server
 ## Tests and troubleshooting
 
 - `npm run verify` runs the build and ordinary tests. Its HTTP and browser tests use a deterministic in-memory repository and do not need an emulator or persist workbench data.
-- `npm run test:visual` captures browser console messages and uncaught browser errors in `logs/visual-tests.log`, replacing that file at the start of each run. The log may contain application data; keep it private.
+- `npm run test:visual` builds the bridge protocol and bridge mock used by its WebSocket integration case, then captures browser console messages and uncaught browser errors in `logs/visual-tests.log`, replacing that file at the start of each run. The test starts and stops its own local mock; no separate bridge process is needed. The log may contain application data; keep it private.
 - The server appends JSON Lines runtime events and caught exceptions to `logs/server.log`. It does not log HTTP request or response bodies. Use `tail -f logs/server.log` in Bash or `Get-Content -Wait logs/server.log` in PowerShell while diagnosing a running server.
 - `npm run test:firestore` starts an isolated Firestore emulator on `127.0.0.1:18080`, distinct from the workbench emulator on `8080`, then tests the actual Firestore repository through the HTTP route. It creates uniquely named test collections and terminates the test emulator afterward. Run a build first if server source has changed.
 
 - Automated API and visual-test servers bind an OS-assigned port rather than the workbench server port `3001`. Visual tests run Vite on strict test-only port `41731`, not the workbench client port `5173`. The Firestore test emulator uses `18080` with auxiliary test-only hub, logging, and WebSocket ports `14400`, `14500`, and `19151`.
-- If the client reports it cannot load class details, check that the emulator and server are running, that the project IDs match, and that `GET /api/getClasses` returns a non-empty, valid class inventory. Seeding is optional; the page does not require a class named `ClassDiagram`.
+- If the client reports it cannot load class details, check that the emulator and server are running, that the project IDs match, and that `GET /api/mock-project/getClasses` returns a non-empty, valid class inventory. Scanner requests use the project name supplied as the scanner CLI's first argument. Seeding is optional; the page does not require a class named `ClassDiagram`.
 - If a port is already in use, stop the process you own or configure another port. For Firestore, update both `firebase.json` and `FIRESTORE_EMULATOR_HOST` together; the client expects the server on port 3001 via the Vite proxy.
 - If a local support package is missing after an npm install, rerun `npm run bootstrap`.
 
@@ -122,9 +124,14 @@ Cloud credentials, production hosting, authentication, and persistent user docum
 ## CodAIgram Bridge VS Code extension
 
 `codAIgram-bridge/` is an independent sibling VS Code extension project. Its
-Step 1 HTTP listener is intentionally loopback-only and always uses port
-`11100`. From that directory, run `npm install` followed by `npm test` to build
+Step 4 WebSocket listener is loopback-only and uses an OS-assigned port plus a
+single-use activation token. From that directory, run `npm install` followed by `npm test` to build
 the current TypeScript source and run its real Extension Development Host
 integration test. For manual debugging, open the extension folder in VS Code
 and press F5; the test and manual host require a desktop/Electron display (or
 Xvfb-equivalent on headless Linux).
+
+For the browser client to connect, add its exact origin to the VS Code setting
+`codaigramBridge.trustedOrigins`, for example `http://127.0.0.1:5173`, then
+reload the extension. The visual-test bridge mock is configured with the
+test-only origin `http://127.0.0.1:41731` automatically.

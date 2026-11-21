@@ -12,17 +12,19 @@
   },
   "scripts": {
     "bootstrap": "node scripts/bootstrap.mjs",
-    "build": "tsc -b && tsc -p server/tsconfig.tests.json && npm run check:gates && tsc -b && tsc -p server/tsconfig.tests.json && vite build --config client/vite.config.ts",
+    "build": "npm run build:bridge-protocol && tsc -b && tsc -p server/tsconfig.tests.json && npm run check:gates && tsc -b && tsc -p server/tsconfig.tests.json && vite build --config client/vite.config.ts --configLoader runner",
     "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json && untrust-buildgates --project client/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project server/tsconfig.tests.json --config buildgates.json && untrust-buildgates --project scanner/tsconfig.json --config buildgates.json && untrust-buildgates-react --project client/tsconfig.json --config client/buildgates-react.json",
     "test": "vitest run client/tests && npm run test:api && npm run test:visual",
     "build:server-tests": "tsc -b server && tsc -p server/tsconfig.tests.json",
     "test:api": "npm run build:server-tests && node --test server/dist-tests/api/*.test.js",
     "test:firestore": "firebase emulators:exec --config firebase.test.json --only firestore --project codaigram-test \"npm run test:firestore:inside\"",
     "test:firestore:inside": "npm run build:server-tests && node --test server/dist-tests/firestore/*.test.js",
+    "build:bridge-protocol": "npm --prefix bridge-protocol run compile",
+    "build:bridge-mock": "npm run build:bridge-protocol && npm --prefix bridge-mock run compile",
     "seed:local": "node scripts/seed-local.mjs",
-    "test:visual": "npm run build:server-tests && node --test server/dist-tests/visual/*.test.js",
+    "test:visual": "npm run build:server-tests && npm run build:bridge-mock && node --test server/dist-tests/visual/*.test.js",
     "verify": "npm run build && npm test",
-    "dev:client": "vite --config client/vite.config.ts",
+    "dev:client": "npm run build:bridge-protocol && vite --config client/vite.config.ts --configLoader runner",
     "start:server": "node server/dist/index.js"
   },
   "dependencies": {

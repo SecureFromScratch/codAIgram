@@ -1,17 +1,14 @@
-export type PromptHistoryEntry = {
-  readonly when: string;
-  readonly text: string;
-};
+export type PromptHistoryEntryT = { readonly when: string; readonly text: string };
 
-export type ScannedTestCase = {
+export type ScannedTestCaseT = {
   readonly group: string;
   readonly name: string;
   readonly description: string;
   readonly prompt: string;
-  readonly prompts: readonly PromptHistoryEntry[];
-};
+  readonly prompts: readonly PromptHistoryEntryT[];
+}
 
-export type TestScanResult = {
+export type TestScanResultT = {
   readonly groups: readonly string[];
-  readonly cases: readonly ScannedTestCase[];
-};
+  readonly cases: readonly ScannedTestCaseT[];
+}

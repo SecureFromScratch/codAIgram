@@ -9,6 +9,7 @@
 | Parser | Lezer | Incremental editor parsing is the target; the first preview uses a small standalone parser. Exact grammar remains open. |
 | Collaboration | Yjs text plus separate visual overrides | Designed for concurrent text and layout state; planned, not implemented. |
 | Backend | Mandate Express with VV boundaries and a Firestore repository | Typed, validated HTTP routes; Firestore is currently emulator-only. WebSocket collaboration is planned. |
+| VS Code bridge | `@codaigram/bridge-protocol` client API connects to the local CodAIgram Bridge | Keeps wire-protocol parsing and requests in the shared client library; selected workspace URIs persist locally while the bridge URL stays in page memory. Prompt forwarding is not yet connected. |
 | AI | Server-side revision-checked DSL proposals | Limits trust and protects concurrent edits; planned. |
 | Invalid text | Last valid graph with a diagnostic | Supports ordinary incomplete edits; implemented for recognized errors. |
 | tldraw | Architectural reference, not dependency | Its editor boundaries are useful; the attached research flags licensing and model fit. |

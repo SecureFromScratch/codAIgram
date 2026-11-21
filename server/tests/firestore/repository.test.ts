@@ -6,6 +6,7 @@ import { registerClassHistoryConcurrencyCase } from "./cases/class-history-concu
 import { registerLegacyPartialWarningCase } from "./cases/legacy-partial-warning.case.js";
 import { registerClassRenameDeleteCase } from "./cases/class-rename-delete.case.js";
 import { registerClassLegacyBaselineCase } from "./cases/class-legacy-baseline.case.js";
+import { registerProjectIsolationCase } from "./cases/project-isolation.case.js";
 describe("Firestore class repository", () => {
   registerPersistAndReadCase();
   registerRequestedOrderCase();
@@ -14,4 +15,5 @@ describe("Firestore class repository", () => {
   registerLegacyPartialWarningCase();
   registerClassRenameDeleteCase();
   registerClassLegacyBaselineCase();
+  registerProjectIsolationCase();
 });

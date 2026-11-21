@@ -27,16 +27,16 @@ export function registerClassLegacyBaselineCase(): void {
         methods: [{ name: 'find', overloads: [[{ arg: 'name', t: 'string' }]] }],
         relations: [],
       }]);
-      await repository.updateClassSnapshots([{
+      await repository.updateClassSnapshots("mock-project", [{
         name: 'New',
         renameOf: 'Old',
         methods: [{ name: 'find', overloads: [{ args: [{ arg: 'name', t: 'string' }] }] }],
         relations: [],
       }], { kind: 'user', name: 'yariv', version: 'v1' });
-      const history = await repository.getClassHistory(['New']);
+      const history = await repository.getClassHistory("mock-project", ['New']);
       assert.equal(history[0]?.methods[0]?.history[0]?.origin.kind, 'legacy');
       assert.equal(history[0]?.methods[0]?.history[0]?.origin.name, 'unknown');
       assert.deepEqual(history[0]?.renames.map((item) => [item.from, item.to]), [['Old', 'New']]);
-      assert.deepEqual(await repository.getDetails(['Old']), []);
+      assert.deepEqual(await repository.getDetails("mock-project", ['Old']), []);
     });
 }

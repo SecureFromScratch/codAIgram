@@ -40,7 +40,7 @@ export function registerUpdateClassesCase(): void {
       );
       const address: ReturnType<Server["address"]> = server.address();
       assert.ok(address && typeof address !== "string");
-      const base: string = `http://127.0.0.1:${String(address.port)}/api`;
+      const base: string = `http://127.0.0.1:${String(address.port)}/api/mock-project`;
       const updates: ClassDetails[] = [
         {
           name: "NewClass",

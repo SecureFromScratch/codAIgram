@@ -30,43 +30,43 @@ export function registerClassRenameDeleteCase(): void {
       };
       try {
         const repository: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-        await repository.updateClassSnapshots([first], origin);
-        const id: string | undefined = (await repository.getClassSnapshots())[0]?.nonCryptoGuid;
+        await repository.updateClassSnapshots("mock-project", [first], origin);
+        const id: string | undefined = (await repository.getClassSnapshots("mock-project"))[0]?.nonCryptoGuid;
         assert.ok(id);
-        await repository.updateClassSnapshots([{
+        await repository.updateClassSnapshots("mock-project", [{
           name: 'Renamed',
           renameOf: 'Original',
           methods: first.methods,
           relations: [],
         }], { kind: 'ai', name: 'model', version: 'v2' });
-        assert.equal((await repository.getLastClassChange())?.classes?.[0]?.renameOf, 'Original');
-        await repository.updateClassSnapshots([{
+        assert.equal((await repository.getLastClassChange("mock-project"))?.classes?.[0]?.renameOf, 'Original');
+        await repository.updateClassSnapshots("mock-project", [{
           name: 'Final',
           renameOf: 'Renamed',
           methods: first.methods,
           relations: [],
         }], { kind: 'scan', name: 'scanner', version: 'v3' });
         const reopened: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-        assert.deepEqual((await reopened.getClassSnapshots()).map((item) => item.name), ['Final']);
-        assert.equal((await reopened.getClassSnapshots())[0]?.nonCryptoGuid, id);
-        assert.deepEqual(await reopened.getDetails(['Original', 'Renamed']), []);
-        const history = await reopened.getClassHistory(['Final']);
+        assert.deepEqual((await reopened.getClassSnapshots("mock-project")).map((item) => item.name), ['Final']);
+        assert.equal((await reopened.getClassSnapshots("mock-project"))[0]?.nonCryptoGuid, id);
+        assert.deepEqual(await reopened.getDetails("mock-project", ['Original', 'Renamed']), []);
+        const history = await reopened.getClassHistory("mock-project", ['Final']);
         assert.deepEqual(history[0]?.renames.map((item) => [item.from, item.to]), [['Original', 'Renamed'], ['Renamed', 'Final']]);
         assert.equal(history[0]?.methods[0]?.history[0]?.origin.version, 'v1');
-        const before = await reopened.getLastClassChange();
-        await assert.rejects(reopened.updateClassSnapshots([{ name: 'Original', methods: [], relations: [] }], origin));
-        await assert.rejects(reopened.updateClassSnapshots([{ name: 'Missing', renameOf: 'Unknown', methods: [], relations: [] }], origin));
-        assert.deepEqual(await reopened.getLastClassChange(), before);
-        await reopened.updateClassSnapshots([{ name: 'Final', state: 'deleted', methods: [], relations: [] }], { kind: 'scan', name: 'scanner', version: 'v4' });
-        assert.equal((await reopened.getClassSnapshots())[0]?.state, 'deleted');
-        assert.equal((await reopened.getClassHistory(['Final']))[0]?.methods[0]?.status, 'deleted');
-        assert.equal((await reopened.getLastClassChange())?.classes?.[0]?.status, 'deleted');
+        const before = await reopened.getLastClassChange("mock-project");
+        await assert.rejects(reopened.updateClassSnapshots("mock-project", [{ name: 'Original', methods: [], relations: [] }], origin));
+        await assert.rejects(reopened.updateClassSnapshots("mock-project", [{ name: 'Missing', renameOf: 'Unknown', methods: [], relations: [] }], origin));
+        assert.deepEqual(await reopened.getLastClassChange("mock-project"), before);
+        await reopened.updateClassSnapshots("mock-project", [{ name: 'Final', state: 'deleted', methods: [], relations: [] }], { kind: 'scan', name: 'scanner', version: 'v4' });
+        assert.equal((await reopened.getClassSnapshots("mock-project"))[0]?.state, 'deleted');
+        assert.equal((await reopened.getClassHistory("mock-project", ['Final']))[0]?.methods[0]?.status, 'deleted');
+        assert.equal((await reopened.getLastClassChange("mock-project"))?.classes?.[0]?.status, 'deleted');
         const server: ReturnType<ReturnType<typeof createApp>['listen']> = createApp(reopened).listen(0, '127.0.0.1');
         try {
           await new Promise<void>((resolve) => server.once('listening', resolve));
           const address: ReturnType<typeof server.address> = server.address();
           assert.ok(address && typeof address !== 'string');
-        const response: Response = await loggedFetch(`http://127.0.0.1:${address.port}/api/getClasses`);
+        const response: Response = await loggedFetch(`http://127.0.0.1:${address.port}/api/mock-project/getClasses`);
           assert.equal(response.status, 200);
           const body: { classes: { name: string; state?: string }[]; lastChange: { classes: { status: string }[] } } = await response.json() as { classes: { name: string; state?: string }[]; lastChange: { classes: { status: string }[] } };
           assert.deepEqual(body.classes.map((item) => [item.name, item.state]), [['Final', 'deleted']]);
@@ -75,10 +75,10 @@ export function registerClassRenameDeleteCase(): void {
           await new Promise<void>((resolve, reject) => server.close((error?: Error) => error ? reject(error) : resolve()));
         }
       } finally {
-        await database.recursiveDelete(database.collection(`${collection}_snapshots`));
-        await database.recursiveDelete(database.collection(`${collection}_metadata`));
-        await database.recursiveDelete(database.collection(`${collection}_revision_ids`));
-        await database.recursiveDelete(database.collection(`${collection}_class_guids`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_snapshots`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_metadata`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_revision_ids`));
+        await database.recursiveDelete(database.collection(`projects/mock-project/${collection}_class_guids`));
         await database.terminate();
       }
     });

@@ -56,12 +56,12 @@ export function registerStartupLoadsDiagramCase(): void {
     let getClassesRequestCount: number = 0;
     await setVisualClasses(ALL_CLASSES);
     const countRequest: (requestValue: import("playwright").Request) => void = (requestValue) => {
-      if (requestValue.url().endsWith("/api/getClasses") && requestValue.method() === "GET") getClassesRequestCount += 1;
+      if (requestValue.url().endsWith("/api/mock-project/getClasses") && requestValue.method() === "GET") getClassesRequestCount += 1;
     };
     page.on("request", countRequest);
     try {
       const request: Promise<import("playwright").Request> = page.waitForRequest(
-        (requestValue) => requestValue.url().endsWith("/api/getClasses") && requestValue.method() === "GET",
+        (requestValue) => requestValue.url().endsWith("/api/mock-project/getClasses") && requestValue.method() === "GET",
       );
       await page.reload();
       await request;

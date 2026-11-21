@@ -25,7 +25,7 @@ export function registerScannerHttpLogCase(): void {
     try {
       const address: ReturnType<Server['address']> = server.address();
       assert.ok(address && typeof address !== 'string');
-      const destination: string = `http://127.0.0.1:${String(address.port)}/api/updateTests`;
+      const destination: string = `http://127.0.0.1:${String(address.port)}/api/fixture/updateTests`;
       const cli: string = path.resolve('scanner/dist/index.js');
       const fixture: string = path.resolve('scanner/mock-testproject');
       const exitCode: number | null = await new Promise((resolve, reject) => {

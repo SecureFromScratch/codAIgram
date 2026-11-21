@@ -4,8 +4,8 @@ import path from 'node:path';
 import ts from 'typescript';
 import type { ClassDetails, ClassMember as ClassMemberT, CompositeTypeT, FieldType as FieldTypeT } from '@codaigram/shared/class-types';
 import { JsonMap } from '@codaigram/shared/json-map';
-import type { ScannedClass as ClassDetailsT, ScannedUnknownRelation as RelationT, StoredScannedClass as StoredClassT } from '@codaigram/shared/model/class';
-import type { PromptHistoryEntry as PromptHistoryEntryT, ScannedTestCase as TestCaseT, TestScanResult as ScanResultT } from '@codaigram/shared/model/test';
+import type { ScannedClassT as ClassDetailsT, ScannedUnknownRelationT as RelationT, StoredScannedClassT as StoredClassT } from '@codaigram/shared/model/class';
+import type { PromptHistoryEntryT, ScannedTestCaseT as TestCaseT, TestScanResultT as ScanResultT } from '@codaigram/shared/model/test';
 import { formatFailure, initializeLog, log, logAndThrow, loggedFetch } from './scanner_utils.js';
 
 enum FileType {
@@ -389,10 +389,10 @@ function isClassSource(filePath: string, knownFiles: ReadonlySet<string>): boole
   return true;
 }
 
-async function uploadTests(cases: readonly TestCaseT[], serverUrl: string): Promise<void> {
+async function uploadTests(projectName: string, cases: readonly TestCaseT[], serverUrl: string): Promise<void> {
   log('INFO', `Uploading ${cases.length} test cases`);
   const payload: string = JSON.stringify(cases);
-  const response: Response = await loggedFetch(new URL('/api/updateTests', serverUrl), {
+  const response: Response = await loggedFetch(new URL(`/api/${projectName}/updateTests`, serverUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload }, payload);
@@ -413,8 +413,8 @@ function sourceFilesFor(rootPaths: readonly string[]): ReadonlySet<string> {
 
 type UploadClassT = Omit<ClassDetailsT, 'declaration'>;
 
-async function deletedClassesForRemovedDeclarations(classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<UploadClassT[]> {
-  const response: Response = await loggedFetch(new URL('/api/getClasses', serverUrl));
+async function deletedClassesForRemovedDeclarations(projectName: string, classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<UploadClassT[]> {
+  const response: Response = await loggedFetch(new URL(`/api/${projectName}/getClasses`, serverUrl));
   if (!response.ok) logAndThrow(new Error(`Class inventory lookup failed with HTTP ${String(response.status)}.`));
   const inventory: { classes: StoredClassT[] } = await response.json() as { classes: StoredClassT[] };
   const currentSourceFiles: ReadonlySet<string> = sourceFilesFor(rootPaths);
@@ -439,8 +439,8 @@ async function deletedClassesForRemovedDeclarations(classes: readonly ClassDetai
     }));
 }
 
-async function uploadClasses(classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<void> {
-  const deleted: UploadClassT[] = await deletedClassesForRemovedDeclarations(classes, rootPaths, serverUrl);
+async function uploadClasses(projectName: string, classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<void> {
+  const deleted: UploadClassT[] = await deletedClassesForRemovedDeclarations(projectName, classes, rootPaths, serverUrl);
   const updates: readonly UploadClassT[] = [...classes, ...deleted];
   log('INFO', `Uploading ${updates.length} class declarations (${deleted.length} deleted from removed source files)`);
   const payload: string = JSON.stringify({
@@ -462,7 +462,7 @@ async function uploadClasses(classes: readonly ClassDetailsT[], rootPaths: reado
       state: detail.state,
     })),
   });
-  const response: Response = await loggedFetch(new URL('/api/updateClasses', serverUrl), {
+  const response: Response = await loggedFetch(new URL(`/api/${projectName}/updateClasses`, serverUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload }, payload);
@@ -516,13 +516,13 @@ async function run(): Promise<void> {
       console.log(`  DESCRIPTION ${testCase.description}`);
       console.log(`  PROMPT ${testCase.prompt}`);
     }
-    if (argumentsValue.serverUrl) await uploadTests(result.cases, argumentsValue.serverUrl);
+    if (argumentsValue.serverUrl) await uploadTests(argumentsValue.projectName, result.cases, argumentsValue.serverUrl);
   }
   if (argumentsValue.fileTypes.includes(FileType.Class)) {
     const classes: readonly ClassDetailsT[] = scanClasses(argumentsValue.rootPaths);
     log('INFO', `Class scan completed: ${classes.length} declarations`);
     classes.forEach(printClassDetails);
-    if (argumentsValue.serverUrl) await uploadClasses(classes, argumentsValue.rootPaths, argumentsValue.serverUrl);
+    if (argumentsValue.serverUrl) await uploadClasses(argumentsValue.projectName, classes, argumentsValue.rootPaths, argumentsValue.serverUrl);
   }
 }
 
