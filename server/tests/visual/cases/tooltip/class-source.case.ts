@@ -109,6 +109,7 @@ export function registerClassSourceCase(): void {
         await connect(connectionUrl);
       }, mock.connectionUrl);
       await page.waitForFunction(() => (window as Window & { __app?: { isVscodeBridgeConnected?: () => boolean } }).__app?.isVscodeBridgeConnected?.() === true);
+      await page.mouse.move(0, 0);
       await sharedTypeName.hover();
       const tooltip: Locator = page.getByRole('tooltip');
       await tooltip.locator('pre.actual-code-snippet').waitFor();
