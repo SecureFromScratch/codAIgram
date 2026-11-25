@@ -6,7 +6,10 @@ export async function waitForMethodNames(
   names: readonly string[],
 ): Promise<void> {
   await page.waitForFunction(
-    (input: { readonly className: string; readonly expected: readonly string[] }) =>
+    (input: { 
+      readonly className: string; 
+      readonly expected: readonly string[] 
+    }) =>
       JSON.stringify(
         [
           ...document.querySelectorAll(
@@ -18,10 +21,10 @@ export async function waitForMethodNames(
   );
 }
 export async function assertRedWavyError(
-  editor: import("playwright").Locator,
+  editor: Locator,
   expected: string,
 ): Promise<void> {
-  const errors: import("playwright").Locator = editor.locator(".dsl-error");
+  const errors: Locator = editor.locator(".dsl-error");
   await errors.first().waitFor();
   assert.ok((await errors.allTextContents()).join("").includes(expected));
   const style: {

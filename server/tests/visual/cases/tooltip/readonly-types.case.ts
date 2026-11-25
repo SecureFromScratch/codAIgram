@@ -1,10 +1,14 @@
+import type { Locator } from 'playwright';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { page, setVisualClasses } from '../../test-support.js';
 
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; history: { when: string; text: string }[] };
+  prompt: { 
+    availability: string; 
+    history: { when: string; text: string }[] 
+  };
 } = {
   title: 'omits readonly modifiers from displayed field and argument types',
   prompt: {
@@ -20,15 +24,24 @@ export function registerReadonlyTypesCase(): void {
     await setVisualClasses([{
       name: 'Example',
       methods: [
-        { name: 'first', overloads: [[{ arg: '+RO', t: 'Readonly<Widget>' }]] },
-        { name: 'second', overloads: [[{ arg: '+RO', t: 'readonly string[]' }]] },
-        { name: 'run', overloads: [[{ arg: 'widget', t: 'Readonly<Widget>' }, { arg: 'names', t: 'readonly string[]' }]] },
+        { 
+          name: 'first', 
+          overloads: [[{ arg: '+RO', t: 'Readonly<Widget>' }]] 
+        },
+        { 
+          name: 'second', 
+          overloads: [[{ arg: '+RO', t: 'readonly string[]' }]] 
+        },
+        { 
+          name: 'run', 
+          overloads: [[{ arg: 'widget', t: 'Readonly<Widget>' }, { arg: 'names', t: 'readonly string[]' }]] 
+        },
       ],
       relations: [],
       
     }]);
     await page.reload();
-    const box: import('playwright').Locator = page.locator('[data-class-name="Example"]');
+    const box: Locator = page.locator('[data-class-name="Example"]');
     await box.waitFor();
     const text: string = await box.locator('text[joint-selector="bodyText"]').textContent() ?? '';
     assert.ok(text.includes('first: Widget'));

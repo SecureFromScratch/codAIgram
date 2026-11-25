@@ -7,6 +7,22 @@ export type MockWorkspaceT = {
   readonly name: string;
   readonly uri: string;
   readonly index: number;
+  readonly configuredAgents?: readonly string[];
+};
+
+export type MockPromptResponseT = {
+  readonly prompt: string;
+  readonly response: string;
+  readonly expectedCwd: string;
+  readonly expectedWorkFolders: readonly string[];
+};
+
+export type MockCodeResponseT = {
+  readonly projectName: string;
+  readonly expectedWorkFolders: readonly string[];
+  readonly filepath: string;
+  readonly typeName: string;
+  readonly code: string | readonly string[];
 };
 
 export type RunningMockBridgeT = {
@@ -22,6 +38,7 @@ type MockBridgeConfigT = {
   readonly workspaceFolders: readonly MockWorkspaceT[];
   readonly workspaceLastModified: number;
   readonly promptResponses: readonly unknown[];
+  readonly codeResponses: readonly MockCodeResponseT[];
   readonly trustedOrigins: readonly string[];
 };
 
@@ -29,14 +46,20 @@ const MOCK_TOKEN: string = 'visual-test-token';
 const WORKSPACE_TIMESTAMP: number = 1_900_000_000_000;
 const TRUSTED_TEST_ORIGIN: string = 'http://127.0.0.1:41731';
 
-export async function startMockBridgeWithFolders(folders: readonly MockWorkspaceT[], port: number = 0): Promise<RunningMockBridgeT> {
+export async function startMockBridgeWithFolders(
+  folders: readonly MockWorkspaceT[],
+  port: number = 0,
+  promptResponses: readonly MockPromptResponseT[] = [],
+  codeResponses: readonly MockCodeResponseT[] = [],
+): Promise<RunningMockBridgeT> {
   const configPath: string = join(tmpdir(), `codaigram-bridge-mock-${process.pid}-${Date.now()}.json`);
   const config: MockBridgeConfigT = {
     authtoken: MOCK_TOKEN,
     port,
     workspaceFolders: folders,
     workspaceLastModified: WORKSPACE_TIMESTAMP,
-    promptResponses: [],
+    promptResponses,
+    codeResponses,
     trustedOrigins: [TRUSTED_TEST_ORIGIN],
   };
   writeFileSync(configPath, JSON.stringify(config), 'utf8');

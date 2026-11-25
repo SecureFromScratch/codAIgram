@@ -1,3 +1,4 @@
+import type { Locator, Request } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, setVisualClasses } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "loads every class when the Classes page is selected",
@@ -55,12 +53,12 @@ export function registerStartupLoadsDiagramCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     let getClassesRequestCount: number = 0;
     await setVisualClasses(ALL_CLASSES);
-    const countRequest: (requestValue: import("playwright").Request) => void = (requestValue) => {
+    const countRequest: (requestValue: Request) => void = (requestValue) => {
       if (requestValue.url().endsWith("/api/mock-project/getClasses") && requestValue.method() === "GET") getClassesRequestCount += 1;
     };
     page.on("request", countRequest);
     try {
-      const request: Promise<import("playwright").Request> = page.waitForRequest(
+      const request: Promise<Request> = page.waitForRequest(
         (requestValue) => requestValue.url().endsWith("/api/mock-project/getClasses") && requestValue.method() === "GET",
       );
       await page.reload();
@@ -75,13 +73,13 @@ export function registerStartupLoadsDiagramCase(): void {
       await page.evaluate(() => {
         const app: { selectClass: (name: string) => void } | undefined =
           (window as Window & { __app?: { selectClass: (name: string) => void } }).__app;
-        if (!app) throw new Error("Application command hook is unavailable.");
+        if (!app) window.logAndThrow(new Error("Application command hook is unavailable."));
         app.selectClass("AuditTrail");
       });
       await page.waitForFunction(
         () => document.querySelector(".cm-content")?.textContent?.includes("recalcLayout()") === true,
       );
-      const editorText: Awaited<ReturnType<import("playwright").Locator["textContent"]>> = await page
+      const editorText: Awaited<ReturnType<Locator["textContent"]>> = await page
         .getByRole("textbox", { name: "Diagram text" })
         .textContent();
       assert.ok(editorText?.includes("recalcLayout()"));

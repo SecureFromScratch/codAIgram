@@ -1,10 +1,13 @@
+import type { Locator } from "playwright";
+import type { TestCaseMetadata } from "../../../test-case-metadata.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, setVisualClasses, VISUAL_CLASSES } from "../../test-support.js";
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "routes class connectors with right-angle elbows",
   prompt: {
+    availability: "available",
     history: [
       { when: "2026/11/15 23:42", text: "add a test - connectors of type elbow lines (assuming that is supported by the graph lib)." },
     ],
@@ -13,9 +16,13 @@ export const TEST_CASE_METADATA = {
 
 export function registerElbowConnectorCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    await setVisualClasses(VISUAL_CLASSES.map((item) => item.name === "ClassDiagram" ? { ...item, name: "AClassDiagram" } : item));
+    await setVisualClasses(VISUAL_CLASSES.map((item) => item.name === "ClassDiagram" ? {
+      name: "AClassDiagram",
+      methods: item.methods,
+      relations: item.relations,
+    } : item));
     await page.reload();
-    const line: import("playwright").Locator = page.locator('.joint-link path[joint-selector="line"]');
+    const line: Locator = page.locator('.joint-link path[joint-selector="line"]');
     await line.waitFor();
     const points: { x: number; y: number }[] = await line.evaluate((element: SVGPathElement) => {
       const path: string = element.getAttribute("d") ?? "";

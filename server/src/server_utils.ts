@@ -36,6 +36,17 @@ function logError(message: string, error: unknown): void {
   writeServerLog('ERROR', message, error);
 }
 
+export function logServerReady(host: string, port: number): void {
+  const message: string = `HTTP server ready to accept connections at http://${host}:${String(port)}`;
+  writeServerLog('INFO', message);
+  console.info(message);
+}
+
+export function logServerStartupFailure(error: Error): void {
+  writeServerLog('ERROR', 'HTTP server failed to listen.', error);
+  console.error('HTTP server failed to listen.', error);
+}
+
 export function logValueShape(label: string, value: unknown): void {
   const shape: unknown = describeValueShape(value, new WeakSet<object>());
   writeServerLog('INFO', `${label}: ${JSON.stringify(shape)}`);

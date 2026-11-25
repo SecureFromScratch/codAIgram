@@ -24,7 +24,7 @@ export function registerClassGlobalLastChangeCase(): void {
   test(TEST_CASE_METADATA.title, async () => runWithServer(async (base: string) => {
     const empty: ClassesResponseT = await (await loggedFetch(`${base}/getClasses`)).json() as ClassesResponseT;
     assert.deepEqual(empty.classes, []);
-    assert.equal(empty.lastChange, undefined);
+    assert.ok(!('lastChange' in empty));
     const first: ClassDtoT = initial();
     await update(base, first, SCAN);
     const before: number = Date.now();
@@ -44,7 +44,12 @@ export function registerClassGlobalLastChangeCase(): void {
     const testsUpdate: Response = await loggedFetch(`${base}/updateTests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([{ group: 'sample', name: 'test', description: 'A test', prompt: 'Test it' }]),
+      body: JSON.stringify([{ 
+        group: 'sample', 
+        name: 'test', 
+        description: 'A test', 
+        prompt: 'Test it' 
+      }]),
     });
     assert.equal(testsUpdate.status, 200);
     const afterTests: ClassesResponseT = await (await loggedFetch(`${base}/getClasses`)).json() as ClassesResponseT;

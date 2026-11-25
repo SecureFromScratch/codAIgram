@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import type { Locator, Response, Route } from "playwright";
 import { test } from "node:test";
+import { logAndThrow } from "../../logging.js";
 import { page, setVisualClasses } from "../../test-support.js";
 import type { ClassDetails } from "../../../../dist/memory-repository.js";
 import type { TestCaseMetadata } from "../../../test-case-metadata.js";
 
 const PROJECT_NAME: string = "mock-project";
-const STARTUP_CLASS: ClassDetails = {
-  name: "StartupVisibleClass",
-  methods: [],
-  relations: [],
-};
+const STARTUP_CLASS: ClassDetails = { name: "StartupVisibleClass", methods: [], relations: [], };
 
 export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "shows a class on startup when the selected project has classes",
@@ -45,16 +42,15 @@ export function registerSelectedProjectShowsClassesCase(): void {
       const firstProject: string | undefined = projectOptions.at(0);
       assert.equal(firstProject, PROJECT_NAME);
       await page.waitForFunction((name: string) => {
-        const selected: HTMLSelectElement | null = document.querySelector('select[aria-label="Current project"]');
-        return selected?.value === name;
+        return document.querySelector<HTMLSelectElement>('select[aria-label="Current project"]')?.value === name;
       }, PROJECT_NAME);
       assert.equal(await selector.inputValue(), PROJECT_NAME);
       await projectsResponse;
 
       const response: Response = await classesResponse;
       const responseBody: unknown = await response.json();
-      if (typeof responseBody !== "object" || responseBody === null || !("classes" in responseBody) || !Array.isArray(responseBody.classes)) {
-        throw new Error("getClasses returned an invalid response body.");
+      if (typeof responseBody !== "object" || !responseBody || !("classes" in responseBody) || !Array.isArray(responseBody.classes)) {
+        logAndThrow(new Error("getClasses returned an invalid response body."));
       }
       assert.ok(responseBody.classes.length > 0);
       await page.locator(".canvas [data-class-name]").first().waitFor({ state: "visible" });

@@ -1,10 +1,12 @@
+import type { TestCaseMetadata } from "../../test-case-metadata.js";
+import type { Server } from "node:http";
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createApp } from '../../../dist/app.js';
 import { MemoryClassRepository } from '../../../dist/memory-class-repository.js';
 import { loggedFetch } from '../../../dist/server_utils.js';
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: 'stores source prompt history without replacing its timestamps or duplicating entries',
   prompt: {
     availability: 'available',
@@ -16,19 +18,25 @@ export const TEST_CASE_METADATA = {
 
 export function registerTestPromptHistoryCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    const server = createApp(new MemoryClassRepository([])).listen(0, '127.0.0.1');
+    const server: Server = createApp(new MemoryClassRepository([])).listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.once('listening', resolve));
-    const address = server.address();
+    const address: ReturnType<Server["address"]> = server.address();
     assert.ok(address && typeof address !== 'string');
     const base: string = `http://127.0.0.1:${address.port}/api/mock-project`;
-    const prompts = [
+    const prompts: { when: string; text: string; }[] = [
       { when: '2026/11/15 09:35', text: 'First original prompt.' },
       {
         when: '2026/11/15 09:36',
         text: 'Second original prompt.'
       },
     ];
-    const entry = {
+    const entry: { 
+      group: string; 
+      name: string; 
+      description: string; 
+      prompt: string; 
+      prompts: { when: string; text: string; }[]; 
+    } = {
       group: 'model',
       name: 'example',
       description: 'preserves prompts',
@@ -50,7 +58,7 @@ export function registerTestPromptHistoryCase(): void {
         body: JSON.stringify([{ group: 'model', name: 'example' }]),
       });
       assert.equal(response.status, 200);
-      const result = await response.json() as { prompts: { when: string; text: string }[] }[];
+      const result: { prompts: { when: string; text: string; }[]; }[] = await response.json() as { prompts: { when: string; text: string }[] }[];
       assert.deepEqual(result[0]?.prompts, prompts);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error?: Error) => error ? reject(error) : resolve()));

@@ -57,13 +57,13 @@ export function registerClassHistoryEmptyModifiesCase(): void {
     };
     await update(base, original, SCAN);
     await update(base, changed, USER);
-    const response = await loggedFetch(`${base}/getClassesHistory`, {
+    const response: Response = await loggedFetch(`${base}/getClassesHistory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ classNames: ['Notebook'] }),
     });
     assert.equal(response.status, 200);
-    const classes = await response.json() as ClassHistoryT[];
+    const classes: ClassHistoryT[] = await response.json() as ClassHistoryT[];
     assert.equal(classes[0]?.methods[0]?.overloads.length, 1);
     assert.deepEqual(classes[0]?.methods[0]?.overloads[0]?.history.map((item) => item.origin), [SCAN, USER]);
     assert.deepEqual(classes[0]?.relations[0]?.history.map((item) => item.origin), [SCAN, USER]);

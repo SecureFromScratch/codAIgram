@@ -14,10 +14,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     reason: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "preserves requested order and duplicates",

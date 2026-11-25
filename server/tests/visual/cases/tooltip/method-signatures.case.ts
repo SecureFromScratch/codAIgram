@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -6,10 +7,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "exposes method signatures and parameter types on hover",
@@ -26,12 +24,12 @@ export const TEST_CASE_METADATA: {
 };
 export function registerMethodSignaturesCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    const source: "Diagram\n  f(name: string, items: string[])\n  g(count: integer)\n  empty()\nOWNS classes: Class[]" =
+    const source: string =
       "Diagram\n  f(name: string, items: string[])\n  g(count: integer)\n  empty()\nOWNS classes: Class[]";
     await page.getByRole("textbox", { name: "Diagram text" }).fill(source);
     await page.waitForFunction(
       () =>
-        document.querySelector('[data-class-name="Diagram"]') !== null,
+        Boolean(document.querySelector('[data-class-name="Diagram"]')),
     );
     {
       const __entryValues: readonly (
@@ -52,7 +50,7 @@ export function registerMethodSignaturesCase(): void {
           | readonly ["f", "f(name, items)\n-name: string\n-items: ✏️string[]"]
           | readonly ["g", "g(count)\n-count: integer"]
           | readonly ["empty", "empty()"] = __entryValues[__entryIndex]!;
-        const method: import("playwright").Locator = page.locator(
+        const method: Locator = page.locator(
           `[data-class-name="Diagram"] [data-method-tooltip^="${name}("]`,
         );
         await method.hover();
@@ -61,7 +59,7 @@ export function registerMethodSignaturesCase(): void {
         assert.ok((await page.getByRole("tooltip").innerText()).includes(name));
       }
     }
-    const first: import("playwright").Locator = page.locator(
+    const first: Locator = page.locator(
       '[data-class-name="Diagram"] [data-method-tooltip^="f("]',
     );
     await first.hover();
@@ -151,7 +149,7 @@ export function registerMethodSignaturesCase(): void {
       .fill(`Palette\n  f(${seven})\nOWNS classes: Class[]`);
     await page.waitForFunction(
       () =>
-        document.querySelector('[data-class-name="Palette"]') !== null,
+        Boolean(document.querySelector('[data-class-name="Palette"]')),
     );
     await page
       .locator('[data-class-name="Palette"] [data-method-tooltip^="f("]')

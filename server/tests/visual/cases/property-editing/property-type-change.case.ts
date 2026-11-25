@@ -7,20 +7,14 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "updates the class box when a property type changes in the editor",
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/17 09:35",
-        text: "add a test: changing the first property type in the first class to Something updates that class's property in the visual class box",
-      },
+      { when: "2026/11/17 09:35", text: "add a test: changing the first property type in the first class to Something updates that class's property in the visual class box", },
     ],
   },
 };

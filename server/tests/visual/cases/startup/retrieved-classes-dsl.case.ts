@@ -10,10 +10,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "selects every retrieved class and renders its exact DSL in the editor",
@@ -33,10 +30,22 @@ const AUDIT_TRAIL: ClassDslExpectationT = {
   details: {
     name: "AuditTrail",
     methods: [
-      { name: "record", overloads: [[{ arg: "entry", t: "string" }]] },
-      { name: "identifier", overloads: [[{ arg: "+RO", t: "string" }]] },
-      { name: "enabled", overloads: [[{ arg: "+RW", t: "boolean" }]] },
-      { name: "count", overloads: [[{ arg: "+PROP", t: "number" }]] },
+      { 
+        name: "record", 
+        overloads: [[{ arg: "entry", t: "string" }]] 
+      },
+      { 
+        name: "identifier", 
+        overloads: [[{ arg: "+RO", t: "string" }]] 
+      },
+      { 
+        name: "enabled", 
+        overloads: [[{ arg: "+RW", t: "boolean" }]] 
+      },
+      { 
+        name: "count", 
+        overloads: [[{ arg: "+PROP", t: "number" }]] 
+      },
     ],
     relations: [{
       kind: "OWNS",
@@ -52,7 +61,10 @@ const AUDIT_TRAIL: ClassDslExpectationT = {
 const AUDIT_EVENT: ClassDslExpectationT = {
   details: {
     name: "AuditEvent",
-    methods: [{ name: "occurredAt", overloads: [[{ arg: "+RO", t: "datetime" }]] }],
+    methods: [{ 
+      name: "occurredAt", 
+      overloads: [[{ arg: "+RO", t: "datetime" }]] 
+    }],
     relations: [],
     state: 'partial',
   },
@@ -62,7 +74,10 @@ const AUDIT_EVENT: ClassDslExpectationT = {
 const AUDIT_SINK: ClassDslExpectationT = {
   details: {
     name: "AuditSink",
-    methods: [{ name: "write", overloads: [[{ arg: "event", t: "AuditEvent" }]] }],
+    methods: [{ 
+      name: "write", 
+      overloads: [[{ arg: "event", t: "AuditEvent" }]] 
+    }],
     relations: [{
       kind: "REF",
       name: "latest",
@@ -90,12 +105,13 @@ async function assertSelectedClassDsl(expectation: ClassDslExpectationT): Promis
 async function waitForEditorDsl(expectation: ClassDslExpectationT): Promise<void> {
   try {
     await page.waitForFunction(
-      (expected: string): boolean => Array.from(document.querySelectorAll(".cm-content .cm-line"))
-        .map((line: Element): string | null => line.textContent)
+      (expected: string) => Array.from(document.querySelectorAll(".cm-content .cm-line"))
+        .map((line: Element) => line.textContent ?? "")
         .join("\n") === expected,
       expectation.dsl,
     );
   } catch (error: unknown) {
+    console.error("Could not synchronize the editor after selecting a class.", error);
     logVisualEvent("ERROR", `Could not synchronize the editor while selecting ${expectation.details.name}: ${error instanceof Error ? error.message : "unknown failure"}`);
     const actual: string = await editorDslText();
     logVisualEvent(

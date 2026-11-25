@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { page } from "../test-support.js";
 export type TooltipPanelEdgeT = "top" | "bottom";
@@ -6,7 +7,7 @@ export async function checkTooltipAtPanelEdge(
 ): Promise<void> {
   await page.setViewportSize({ width: 1600, height: 440 });
   try {
-    const canvas: import("playwright").Locator = page.locator(".canvas");
+    const canvas: Locator = page.locator(".canvas");
     await canvas.evaluate(
       (element: Element, edgeName: TooltipPanelEdgeT) => {
         const box: ReturnType<Element["querySelector"]> = element.querySelector(
@@ -51,7 +52,7 @@ export async function checkTooltipAtPanelEdge(
     await page
       .locator('[data-class-name="ClassDiagram"] [data-method-index="0"]')
       .hover();
-    const tooltip: import("playwright").Locator = page.getByRole("tooltip");
+    const tooltip: Locator = page.getByRole("tooltip");
     await tooltip.waitFor();
     const bounds: {
       readonly tip: DOMRect;

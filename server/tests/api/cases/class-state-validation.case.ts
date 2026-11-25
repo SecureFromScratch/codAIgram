@@ -17,12 +17,17 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 type ChangeResponseT = {
   classes: { name: string; state?: 'partial' | 'deleted' }[];
-  lastChange: { classes: { name: string; status: string; renameOf?: string }[] };
+  lastChange: { 
+    classes: { name: string; status: string; renameOf?: string }[] 
+  };
 };
+type StateValidationCaseT = readonly ["partial" | "unknown", 200 | 400];
 
 export function registerClassStateValidationCase(): void {
   test(TEST_CASE_METADATA.title, async () => runWithServer(async (base: string) => {
-      for (const [state, expected] of [['partial', 200], ['unknown', 400]] as const) {
+      const stateCases: readonly StateValidationCaseT[] = [['partial', 200], ['unknown', 400]];
+      const validateState: (stateCase: StateValidationCaseT) => Promise<void> = async (stateCase: StateValidationCaseT) => {
+        const [state, expected]: StateValidationCaseT = stateCase;
         const response: Response = await loggedFetch(`${base}/updateClasses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -32,7 +37,15 @@ export function registerClassStateValidationCase(): void {
           }),
         });
         assert.equal(response.status, expected);
-      }
+      };
+      const stateChecks: Promise<void> = stateCases.reduce<Promise<void>>(
+        async (previous: Promise<void>, stateCase: StateValidationCaseT) => {
+          await previous;
+          await validateState(stateCase);
+        },
+        Promise.resolve(),
+      );
+      await stateChecks;
       const current: ChangeResponseT = await (await loggedFetch(`${base}/getClasses`)).json() as ChangeResponseT;
       assert.equal(current.classes[0]?.state, 'partial');
       assert.ok(current.classes.every((item) => !('isPartial' in item)));
@@ -47,7 +60,10 @@ export function registerClassStateValidationCase(): void {
       const legacy: Response = await loggedFetch(`${base}/updateClasses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: { kind: 'scan', name: 'scanner', version: 'v2' }, classes: [{ name: 'Old', methods: [], relations: [], isPartial: true }] }),
+        body: JSON.stringify({ 
+          origin: { kind: 'scan', name: 'scanner', version: 'v2' }, 
+          classes: [{ name: 'Old', methods: [], relations: [], isPartial: true }] 
+        }),
       });
       assert.equal(legacy.status, 400);
     }));

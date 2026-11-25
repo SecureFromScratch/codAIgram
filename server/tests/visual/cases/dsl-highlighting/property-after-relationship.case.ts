@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,20 +8,14 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "marks a property after a relationship as a DSL syntax error",
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/17 00:00",
-        text: "add a test: text editor shows a dsl syntax error if a property is after the relationships (within the same class == before the separaiting empty line)",
-      },
+      { when: "2026/11/17 00:00", text: "add a test: text editor shows a dsl syntax error if a property is after the relationships (within the same class == before the separaiting empty line)", },
     ],
   },
 };
@@ -37,7 +32,7 @@ export function registerPropertyAfterRelationshipCase(): void {
 
     await editor.fill(source);
 
-    const diagnostic: import("playwright").Locator = editor
+    const diagnostic: Locator = editor
       .locator(".dsl-error")
       .filter({ hasText: invalidProperty });
     await diagnostic.waitFor();

@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -33,13 +31,13 @@ export function registerMultipleClassesCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
-    const extra: "\n\nClass\n  isPartial : bool\n  modifications: ModificationRecord[]\n  addModification(ModificationRecord)\n\nModificationRecord\n  by: [AI, Human, Scan]\n  at: datetime" =
+    const extra: string =
       "\n\nClass\n  isPartial : bool\n  modifications: ModificationRecord[]\n  addModification(ModificationRecord)\n\nModificationRecord\n  by: [AI, Human, Scan]\n  at: datetime";
     const source: string = text + extra;
     await editor.fill(source);
     await page.locator('[data-class-name="ModificationRecord"]').waitFor();
     assert.equal(await editor.locator(".dsl-error").count(), 0);
-    const classBox: import("playwright").Locator = page.locator(
+    const classBox: Locator = page.locator(
       '[data-class-name="Class"]',
     );
     assert.ok(((await classBox.textContent()) ?? "").includes("modifications"));
@@ -59,7 +57,7 @@ export function registerMultipleClassesCase(): void {
       .locator('[data-class-name="Class"].joint-type-standard-headeredrectangle')
       .waitFor();
     await editor.fill(source.replace("\n\nClass\n", "\n\nClassDiagram\n"));
-    const conflict: import("playwright").Locator = editor
+    const conflict: Locator = editor
       .locator(".dsl-error")
       .filter({ hasText: "ClassDiagram" });
     await conflict.first().waitFor();
@@ -73,7 +71,7 @@ export function registerMultipleClassesCase(): void {
       .filter({ hasText: "Duplicate class name: ClassDiagram." })
       .waitFor();
     await editor.fill(source.replace("\n\nClass\n", "\nClass\n"));
-    const separator: import("playwright").Locator = editor
+    const separator: Locator = editor
       .locator(".dsl-error")
       .filter({ hasText: "Class" });
     await separator.first().waitFor();

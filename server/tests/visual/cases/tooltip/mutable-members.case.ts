@@ -1,10 +1,14 @@
+import type { Locator } from 'playwright';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { page, setVisualClasses } from '../../test-support.js';
 
 export const TEST_CASE_METADATA: {
   title: string;
-  prompt: { availability: string; history: { when: string; text: string }[] };
+  prompt: { 
+    availability: string; 
+    history: { when: string; text: string }[] 
+  };
 } = {
   title: 'marks writable attributes and mutable method arguments with a pencil',
   prompt: {
@@ -22,25 +26,34 @@ export function registerMutableMembersCase(): void {
     await setVisualClasses([{
       name: 'Example',
       methods: [
-        { name: 'editable', overloads: [[{ arg: '+RW', t: 'string' }]] },
-        { name: 'fixed', overloads: [[{ arg: '+RO', t: 'string' }]] },
-        { name: 'run', overloads: [
+        { 
+          name: 'editable', 
+          overloads: [[{ arg: '+RW', t: 'string' }]] 
+        },
+        { 
+          name: 'fixed', 
+          overloads: [[{ arg: '+RO', t: 'string' }]] 
+        },
+        { 
+          name: 'run', 
+          overloads: [
           [{ arg: 'names', t: 'string[]' }, { arg: 'title', t: 'string' }, { arg: 'count', t: 'number' }],
           [{ arg: 'values', t: 'readonly string[]' }, { arg: 'widget', t: 'Widget' }],
-        ] },
+        ] 
+        },
       ],
       relations: [],
       
     }]);
     await page.reload();
-    const box: import('playwright').Locator = page.locator('[data-class-name="Example"]');
+    const box: Locator = page.locator('[data-class-name="Example"]');
     await box.waitFor();
     const text: string = await box.locator('text[joint-selector="bodyText"]').textContent() ?? '';
     assert.match(text, /editable: ✏️string/);
     assert.doesNotMatch(text, /✏️\s*editable|fixed: ✏️/);
-    const editable: import('playwright').Locator = box.locator('[data-method-tooltip^="editable:"]');
+    const editable: Locator = box.locator('[data-method-tooltip^="editable:"]');
     assert.equal(await editable.textContent(), 'editable: ✏️string');
-    const methods: import('playwright').Locator = box.locator('[data-method-tooltip^="run("]');
+    const methods: Locator = box.locator('[data-method-tooltip^="run("]');
     await methods.nth(0).hover();
     let tooltip: string = await page.getByRole('tooltip').innerText();
     assert.match(tooltip, /✏️string\[\]/);

@@ -30,10 +30,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -169,11 +166,11 @@ export function registerTextEllipsisCase(): void {
       ["addClass", "addPartialClass", "connectClasses", "recalcLayout"],
       "Class",
     );
-    const heading: "VeryWideClassDiagramNameWithManyCharacters" =
+    const heading: string =
       "VeryWideClassDiagramNameWithManyCharacters";
-    const member: "anExtremelyLongMethodNameWithArguments(name: string)" =
+    const member: string =
       "anExtremelyLongMethodNameWithArguments(name: string)";
-    const target: "AnotherVeryLongTargetClassName" =
+    const target: string =
       "AnotherVeryLongTargetClassName";
     await page
       .getByRole("textbox", { name: "Diagram text" })

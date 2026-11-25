@@ -1,3 +1,6 @@
+import type { TestCaseMetadata } from "../../test-case-metadata.js";
+import type { DatabaseClassChange } from "../../../dist/memory-repository.js";
+import type { CurrentClass, ClassHistory } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
@@ -5,7 +8,7 @@ import { createLocalFirestore, FirestoreClassRepository } from '../../../dist/fi
 import type { ClassOrigin, ClassUpdate } from '../../../dist/class-revision.js';
 import { ERROR_CODES } from '../../../dist/error-codes.js';
 
-export const TEST_CASE_METADATA = {
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: 'persists class snapshots and separately stored revision deltas',
   prompt: {
     availability: 'available',
@@ -51,42 +54,43 @@ export function registerClassHistoryCase(): void {
       assert.equal(storedPartial?.value.state, 'partial');
       assert.ok(!('isPartial' in storedPartial!.value));
       assert.equal((await repository.getClassSnapshots("mock-project"))[0]?.state, 'partial');
-      const timestampLastChange = await repository.getLastClassChange("mock-project");
+      const timestampLastChange: DatabaseClassChange | undefined = await repository.getLastClassChange("mock-project");
       const timestampRevisionCount: number = storedPartial!.revisionCount as number;
-      await repository.updateClassSnapshots("mock-project", [{
-        ...initial,
+      const timestampOnlyUpdate: ClassUpdate = {
+        name: initial.name,
+        methods: initial.methods,
+        relations: initial.relations,
+        state: 'partial',
+        sourceFile: 'src/notebook.ts',
         modifiedAt: '2026-11-17T09:31:00.000Z',
-      }], user);
+      };
+      await repository.updateClassSnapshots("mock-project", [timestampOnlyUpdate], user);
       const refreshedSnapshot: FirebaseFirestore.DocumentData | undefined = (await database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook').get()).data();
       assert.equal(refreshedSnapshot?.value.modifiedAt, '2026-11-17T09:31:00.000Z');
       assert.equal(refreshedSnapshot?.revisionCount, timestampRevisionCount);
       assert.deepEqual(await repository.getLastClassChange("mock-project"), timestampLastChange);
       await repository.updateClassSnapshots("mock-project", [initial], user);
       const before: number = Date.now();
-      await repository.updateClassSnapshots("mock-project", [{
-        name: 'Notebook',
-        methods: [],
-        relations: [],
-        }], user);
+      await repository.updateClassSnapshots("mock-project", [{ name: 'Notebook', methods: [], relations: [], }], user);
       const after: number = Date.now();
       const reopened: FirestoreClassRepository = new FirestoreClassRepository(database, collection);
-      const lastChange = await reopened.getLastClassChange("mock-project");
+      const lastChange: DatabaseClassChange | undefined = await reopened.getLastClassChange("mock-project");
       assert.ok(lastChange);
       assert.deepEqual(lastChange.origin, user);
       assert.deepEqual(lastChange.classes?.map((item) => [item.name, item.status]), [['Notebook', 'modified']]);
       assert.ok(lastChange.classes?.[0]?.changes.some((change) => change.kind === 'member' && change.after === 'absent'));
       assert.ok(lastChange.classes?.[0]?.changes.some((change) => change.kind === 'relation' && change.after === 'absent'));
       assert.ok(Date.parse(lastChange.changedAt) >= before && Date.parse(lastChange.changedAt) <= after);
-      const current = await reopened.getClassSnapshots("mock-project");
+      const current: CurrentClass[] = await reopened.getClassSnapshots("mock-project");
       assert.equal(current.length, 1);
       assert.deepEqual(current[0]?.methods, []);
       assert.deepEqual(current[0]?.relations, []);
-      const history = await reopened.getClassHistory("mock-project", ['Notebook']);
+      const history: ClassHistory[] = await reopened.getClassHistory("mock-project", ['Notebook']);
       assert.equal(history[0]?.methods[0]?.status, 'deleted');
       assert.equal(history[0]?.relations[0]?.status, 'deleted');
       assert.deepEqual(history[0]?.methods[0]?.history.map((item) => item.origin.name), ['test-scanner', 'test-user']);
       assert.ok(history[0]?.methods[0]?.history.every((item) => !Number.isNaN(Date.parse(item.when))));
-      const revisions = await database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook').collection('revisions').get();
+      const revisions: FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData, FirebaseFirestore.DocumentData> = await database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook').collection('revisions').get();
       assert.equal(revisions.size, 2);
       const guid: string | undefined = current[0]?.nonCryptoGuid;
       assert.ok(guid);
@@ -94,14 +98,14 @@ export function registerClassHistoryCase(): void {
       assert.match(guid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       assert.ok(revisions.docs.every((item) => item.data().value.nonCryptoGuid === guid));
       await repository.updateClassSnapshots("mock-project", [{ name: 'Other', methods: [], relations: [], }], scan);
-      const classes = await reopened.getClassSnapshots("mock-project");
+      const classes: CurrentClass[] = await reopened.getClassSnapshots("mock-project");
       assert.equal(classes.find((item) => item.name === 'Notebook')?.nonCryptoGuid, guid);
       assert.notEqual(classes.find((item) => item.name === 'Other')?.nonCryptoGuid, guid);
-      const snapshotReference = database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook');
+      const snapshotReference: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData, FirebaseFirestore.DocumentData> = database.collection(`projects/mock-project/${collection}_snapshots`).doc('Notebook');
       await snapshotReference.update({ revisionCount: 3 });
       await assert.rejects(reopened.getClassHistory("mock-project", ['Notebook']), { code: ERROR_CODES.CLASS_HISTORY_INCOMPLETE });
       await snapshotReference.update({ revisionCount: 2 });
-      const revisionReference = snapshotReference.collection('revisions').doc('000000000001');
+      const revisionReference: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData, FirebaseFirestore.DocumentData> = snapshotReference.collection('revisions').doc('000000000001');
       await revisionReference.update({
         value: {
           origin: scan,

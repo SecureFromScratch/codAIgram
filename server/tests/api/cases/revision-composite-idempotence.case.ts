@@ -23,13 +23,19 @@ export function registerRevisionCompositeIdempotenceCase(): void {
     const reorderedType: JsonMap<string, CompositeTypeT> = new JsonMap<string, CompositeTypeT>([['second', 'number'], ['first', 'string']]);
     const first: ClassUpdate = {
       name: 'Notebook',
-      methods: [{ name: 'settings', overloads: [{ args: [{ arg: '+RO', t: firstType }] }] }],
+      methods: [{ 
+        name: 'settings', 
+        overloads: [{ args: [{ arg: '+RO', t: firstType }] }] 
+      }],
       relations: [],
       
     };
     const second: ClassUpdate = {
       name: 'Notebook',
-      methods: [{ name: 'settings', overloads: [{ args: [{ arg: '+RO', t: reorderedType }] }] }],
+      methods: [{ 
+        name: 'settings', 
+        overloads: [{ args: [{ arg: '+RO', t: reorderedType }] }] 
+      }],
       relations: [],
       
     };

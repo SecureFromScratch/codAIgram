@@ -1,3 +1,4 @@
+import type { Locator } from 'playwright';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -10,10 +11,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: 'shows every supplied class, member, relationship, and selected editor definition',
@@ -46,7 +44,7 @@ function expectedDsl(details: ClassDetails): string {
 async function checkClass(details: ClassDetails, failures: string[]): Promise<void> {
   await page.reload();
   await page.locator(`[data-class-name="${details.name}"]`).waitFor();
-  const box: import('playwright').Locator = page.locator(`[data-class-name="${details.name}"]`);
+  const box: Locator = page.locator(`[data-class-name="${details.name}"]`);
   try {
     assert.equal(await box.count(), 1, `${details.name}: expected one class box`);
     const boxText: string = await box.textContent() ?? '';
@@ -57,15 +55,20 @@ async function checkClass(details: ClassDetails, failures: string[]): Promise<vo
     for (let index: number = 0; index < details.relations.length; index += 1) {
       const relation: ClassDetails['relations'][number] = details.relations[index]!;
       if (await page.locator(`[data-class-name="${relation.target}"]`).count() !== 1) failures.push(`${details.name}: missing relationship target ${relation.target}`);
-      const connector: import('playwright').Locator = page.locator('.joint-link').filter({
-        has: page.locator('text').getByText(relation.name, { exact: true }) });
+      const connector: Locator = page.locator('.joint-link').filter({
+        has: page.locator('text').getByText(relation.name, { exact: true }) 
+      });
       if (await connector.count() !== 1) failures.push(`${details.name}: missing connector ${relation.name}`);
       else {
         if (await connector.locator('text').getByText('*', { exact: true }).count() !== (relation.many ? 1 : 0)) failures.push(`${details.name}.${relation.name}: incorrect multiplicity`);
         const connected: boolean = await connector.evaluate((element: Element, names: { source: string; target: string; }) => {
+          // UNTRUST-ALLOW-NULLISH: The browser SVG query may not find its connector path until rendering completes; returning false avoids dereferencing an absent graphical element.
           const line: SVGPathElement | null = element.querySelector('path[joint-selector="line"]');
+          // UNTRUST-ALLOW-NULLISH: The source class element can be absent when the generated graph is incomplete, which is a failed visual assertion rather than a reason to dereference it.
           const source: Element | null = document.querySelector(`[data-class-name="${names.source}"]`);
+          // UNTRUST-ALLOW-NULLISH: The target class element can be absent when the generated graph is incomplete, which is a failed visual assertion rather than a reason to dereference it.
           const target: Element | null = document.querySelector(`[data-class-name="${names.target}"]`);
+          // UNTRUST-ALLOW-NULLISH: SVG getScreenCTM can return null for detached or non-rendered paths; this check treats such a connector as not connected.
           const transform: DOMMatrix | null = line?.getScreenCTM() ?? null;
           if (!line || !source || !target || !transform) return false;
           const start: DOMPoint = line.getPointAtLength(0).matrixTransform(transform);

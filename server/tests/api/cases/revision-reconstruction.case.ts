@@ -1,3 +1,4 @@
+import type { RevisionResult, ClassHistory, HistoryMember } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
@@ -20,7 +21,8 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerRevisionReconstructionCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    const created = reviseClass(INITIAL, undefined, SCAN);
+    // UNTRUST-ALLOW-NULLISH: This case creates the class's first revision, so the reducer must receive no previous snapshot and record an initial state.
+    const created: RevisionResult = reviseClass(INITIAL, undefined, SCAN);
     const edited: ClassUpdate = {
       name: 'Notebook',
       methods: [{
@@ -31,13 +33,9 @@ export function registerRevisionReconstructionCase(): void {
       relations: [],
       
     };
-    const changed = reviseClass(edited, created.current, USER);
+    const changed: RevisionResult = reviseClass(edited, created.current, USER);
     assert.deepEqual(reviseClass(edited, changed.current, USER).changes, []);
-    const removed = reviseClass({
-      name: 'Notebook',
-      methods: [],
-      relations: [],
-      }, changed.current, USER);
+    const removed: RevisionResult = reviseClass({ name: 'Notebook', methods: [], relations: [], }, changed.current, USER);
     const revisions: ClassRevision[] = [
       {
         origin: SCAN,
@@ -55,8 +53,8 @@ export function registerRevisionReconstructionCase(): void {
         changes: removed.changes
       },
     ];
-    const history = rebuildClassHistory(removed.current, revisions);
-    const member = history.methods.find((item) => item.name === 'search');
+    const history: ClassHistory = rebuildClassHistory(removed.current, revisions);
+    const member: HistoryMember | undefined = history.methods.find((item) => item.name === 'search');
     assert.equal(member?.status, 'deleted');
     assert.deepEqual(member?.history.map((item) => item.origin.name), ['scanner', 'alice', 'alice']);
     assert.deepEqual(member?.history.map((item) => item.when), ['2026-11-15T09:35:00Z', '2026-11-15T09:36:00Z', '2026-11-15T09:37:00Z']);

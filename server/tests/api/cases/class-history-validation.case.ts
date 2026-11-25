@@ -28,37 +28,33 @@ export function registerClassHistoryValidationCase(): void {
       },
       {
         origin: USER,
-        classes: [{
-          name: 'Notebook',
-          methods: [],
-          relations: [],
-          }, {
-          name: 'Notebook',
-          methods: [],
-          relations: [],
-          }]
+        classes: [{ name: 'Notebook', methods: [], relations: [], }, { name: 'Notebook', methods: [], relations: [], }]
       },
       {
         origin: USER,
-        classes: [{
-          name: 'NewClass',
-          methods: [],
-          relations: [],
-          }, {
+        classes: [{ name: 'NewClass', methods: [], relations: [], }, {
           name: 'Notebook',
           methods: [{ name: 'search', modifies: 'missing', overloads: [] }],
           relations: [],
           }]
       },
     ];
-    for (const body of invalidBatches) {
-      const response = await loggedFetch(`${base}/updateClasses`, {
+    const checkInvalidBatch: (body: unknown) => Promise<void> = async (body: unknown) => {
+      const response: Response = await loggedFetch(`${base}/updateClasses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       assert.equal(response.status, 400);
       assert.deepEqual(await (await loggedFetch(`${base}/getClasses`)).json(), before);
-    }
+    };
+    const invalidBatchChecks: Promise<void> = invalidBatches.reduce<Promise<void>>(
+      async (previous: Promise<void>, body: unknown) => {
+        await previous;
+        await checkInvalidBatch(body);
+      },
+      Promise.resolve(),
+    );
+    await invalidBatchChecks;
   }));
 }

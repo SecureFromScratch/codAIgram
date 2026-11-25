@@ -8,7 +8,7 @@ export type SecondaryClassFixtureT = {
   readonly members: readonly string[];
 };
 export type SecondaryClassIsolationT = {
-  readonly editor: import("playwright").Locator;
+  readonly editor: Locator;
   readonly selected: SecondaryClassFixtureT;
 };
 export const SECONDARY_CLASSES: readonly SecondaryClassFixtureT[] = [
@@ -20,8 +20,8 @@ export const SECONDARY_CLASSES: readonly SecondaryClassFixtureT[] = [
   {
     name: "ModificationHistory",
     source:
-      "ModificationHistory\n  modifications : Modification[]\n  push(newModification: Modification)\n  compact(maxModsToKeep: positive)",
-    members: ["modifications : Modification[]", "push", "compact"],
+      "ModificationHistory\n  modifications: Modification[]\n  push(newModification: Modification)\n  compact(maxModsToKeep: positive)",
+    members: ["modifications: Modification[]", "push", "compact"],
   },
 ];
 export function getSecondaryClassFixture(name: string): SecondaryClassFixtureT {
@@ -40,7 +40,7 @@ export async function isolateSecondaryClass(
   await editor.fill(
     `${text}\n\n${SECONDARY_CLASSES.map((item: SecondaryClassFixtureT) => item.source).join("\n\n")}`,
   );
-  const target: import("playwright").Locator = page.locator(
+  const target: Locator = page.locator(
     `[data-class-name="${name}"]`,
   );
   await target.waitFor();

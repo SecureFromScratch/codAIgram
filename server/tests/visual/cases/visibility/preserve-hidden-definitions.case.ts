@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "preserves hidden class definitions while editing a displayed class",
@@ -41,7 +39,7 @@ export function registerPreserveHiddenDefinitionsCase(): void {
         (item.textContent ?? "").includes("isComplete"),
       ),
     );
-    const hidden: import("playwright").Locator = page.locator(
+    const hidden: Locator = page.locator(
       '[data-class-name="ClassDiagram"]',
     );
     assert.equal(await hidden.count(), 1);

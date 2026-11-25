@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -10,10 +11,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -47,7 +45,7 @@ export function registerInvalidOwnershipCase(): void {
         await page.waitForFunction(
           () => document.querySelectorAll(".joint-link").length === 0,
         );
-        const error: import("playwright").Locator =
+        const error: Locator =
           editor.locator(".dsl-error");
         await error.first().waitFor();
         assert.ok(

@@ -1,3 +1,4 @@
+import type { ClassDtoT } from "../support/class-history-support.js";
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loggedFetch } from '../../../dist/server_utils.js';
@@ -18,11 +19,11 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerClassIdempotenceCase(): void {
   test(TEST_CASE_METADATA.title, async () => runWithServer(async (base) => {
-    const input = initial();
+    const input: ClassDtoT = initial();
     await update(base, input, SCAN);
-    const first = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
+    const first: CurrentClassDtoT[] = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
     await update(base, input, SCAN);
-    const second = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
+    const second: CurrentClassDtoT[] = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
     assert.deepEqual(second, first);
     assert.deepEqual(second, [classData(input)]);
     const historyResponse: Response = await loggedFetch(`${base}/getClassesHistory`, {

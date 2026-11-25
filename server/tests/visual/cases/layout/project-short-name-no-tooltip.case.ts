@@ -9,10 +9,7 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/19 09:35",
-        text: "Hovering over a short project name that fits in the combobox must not show a tooltip.",
-      },
+      { when: "2026/11/19 09:35", text: "Hovering over a short project name that fits in the combobox must not show a tooltip.", },
     ],
   },
 };

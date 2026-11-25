@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { page } from "../test-support.js";
 import { logAndThrow } from "../logging.js";
@@ -6,6 +7,9 @@ import {
   isolateSecondaryClass,
   type SecondaryClassFixtureT,
 } from "./secondary-class-support.js";
+
+type EditablePropertyDslT = "by: string" | "modifications: Modification[]";
+type GraphEdgeT = "top" | "bottom";
 export async function verifySecondaryClassStructure(
   fixture: SecondaryClassFixtureT,
 ): Promise<void> {
@@ -97,10 +101,10 @@ export async function verifySecondaryClassPropertyEdits(
     selected,
   }: Awaited<ReturnType<typeof isolateSecondaryClass>> =
     await isolateSecondaryClass(fixture.name);
-  const property: "by: string" | "modifications : Modification[]" =
+  const property: EditablePropertyDslT =
     fixture.name === "Modification"
       ? "by: string"
-      : "modifications : Modification[]";
+      : "modifications: Modification[]";
   await editor.fill(selected.source.replace(property, "updated: boolean"));
   await page.waitForFunction(
     (name: string) =>
@@ -132,7 +136,7 @@ export async function verifySecondaryClassMethodEdits(
     await isolateSecondaryClass(fixture.name);
   const original: string = `${selected.source}\n  inspect(value: string)`;
   await editor.fill(original);
-  const box: import("playwright").Locator = page.locator(
+  const box: Locator = page.locator(
     `[data-class-name="${fixture.name}"]`,
   );
   await page.waitForFunction(
@@ -148,7 +152,7 @@ export async function verifySecondaryClassMethodEdits(
       "review(label: number, active: boolean)",
     ),
   );
-  const method: import("playwright").Locator = box.locator(
+  const method: Locator = box.locator(
     '[data-method-tooltip^="review("]',
   );
   await method.waitFor();
@@ -172,7 +176,7 @@ export async function verifySecondaryClassMethodEdits(
   );
   await assertRedWavyError(editor, "review(label number)");
   await editor.fill(current);
-  const line: import("playwright").Locator = editor
+  const line: Locator = editor
     .locator(".cm-line")
     .filter({ hasText: "review(label: number, active: boolean)" });
   await line.click();
@@ -269,7 +273,7 @@ export async function verifySecondaryClassTooltipEdges(
   await page.setViewportSize({ width: 1600, height: 440 });
   try {
     {
-      const __edgeValues: readonly ("top" | "bottom")[] = [
+      const __edgeValues: readonly GraphEdgeT[] = [
         "top",
         "bottom",
       ] as const;
@@ -278,11 +282,11 @@ export async function verifySecondaryClassTooltipEdges(
         __edgeIndex < __edgeValues.length;
         __edgeIndex += 1
       ) {
-        const edge: "top" | "bottom" = __edgeValues[__edgeIndex]!;
+        const edge: GraphEdgeT = __edgeValues[__edgeIndex]!;
         await page.locator(".canvas").evaluate(
           (
             canvas: Element,
-            input: { readonly name: string; readonly side: "top" | "bottom"; },
+            input: { readonly name: string; readonly side: GraphEdgeT; },
           ) => {
             const rectangle: ReturnType<Element["querySelector"]> = canvas.querySelector(
               `[data-class-name="${input.name}"] rect`,
@@ -303,7 +307,7 @@ export async function verifySecondaryClassTooltipEdges(
             `[data-class-name="${fixture.name}"] [data-method-tooltip^="inspect("]`,
           )
           .hover();
-        const tooltip: import("playwright").Locator = page.getByRole("tooltip");
+        const tooltip: Locator = page.getByRole("tooltip");
         await tooltip.waitFor();
         const fits: boolean = await tooltip.evaluate(
           (element: HTMLElement) => {

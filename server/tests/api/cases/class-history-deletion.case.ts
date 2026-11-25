@@ -19,19 +19,15 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 export function registerClassHistoryDeletionCase(): void {
   test(TEST_CASE_METADATA.title, async () => runWithServer(async (base) => {
     await update(base, initial(), SCAN);
-    await update(base, {
-      name: 'Notebook',
-      methods: [],
-      relations: [],
-      }, { kind: 'user', name: 'alice', version: USER.version });
-    const response = await loggedFetch(`${base}/getClassesHistory`, {
+    await update(base, { name: 'Notebook', methods: [], relations: [], }, { kind: 'user', name: 'alice', version: USER.version });
+    const response: Response = await loggedFetch(`${base}/getClassesHistory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ classNames: ['Notebook'] }),
     });
     assert.equal(response.status, 200);
-    const classes = await response.json() as ClassHistoryT[];
-    const history = classes[0];
+    const classes: ClassHistoryT[] = await response.json() as ClassHistoryT[];
+    const history: ClassHistoryT | undefined = classes[0];
     assert.ok(history);
     assert.ok(history.methods.every((item) => item.status === 'deleted' && item.history.at(-1)?.origin.name === 'yariv'));
     assert.ok(history.relations.every((item) => item.status === 'deleted' && item.history.at(-1)?.origin.name === 'yariv'));

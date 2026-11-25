@@ -17,7 +17,9 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 type ChangeResponseT = {
   classes: { name: string; state?: 'partial' | 'deleted' }[];
-  lastChange: { classes: { name: string; status: string; renameOf?: string }[] };
+  lastChange: { 
+    classes: { name: string; status: string; renameOf?: string }[] 
+  };
 };
 
 export function registerClassRenameConflictsCase(): void {
@@ -26,7 +28,10 @@ export function registerClassRenameConflictsCase(): void {
         return loggedFetch(`${base}/updateClasses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ origin: { kind: 'scan', name: 'scanner', version: 'v1' }, classes }),
+          body: JSON.stringify({ 
+            origin: { kind: 'scan', name: 'scanner', version: 'v1' }, 
+            classes 
+          }),
         });
       }
       assert.equal((await send([
@@ -34,14 +39,43 @@ export function registerClassRenameConflictsCase(): void {
         { name: 'Second', methods: [], relations: [] },
       ])).status, 200);
       const before: unknown = await (await loggedFetch(`${base}/getClasses`)).json();
-      for (const invalid of [
-        [{ name: 'Second', renameOf: 'First', methods: [], relations: [] }],
-        [{ name: 'Other', renameOf: 'Missing', methods: [], relations: [] }],
-        [{ name: 'Missing', state: 'deleted', methods: [], relations: [] }],
-        [{ name: 'Other', renameOf: 'First', methods: [], relations: [] }, { name: 'First', methods: [], relations: [] }],
-      ]) {
+      const invalidBatches: readonly unknown[][] = [
+        [{ 
+          name: 'Second', 
+          renameOf: 'First', 
+          methods: [], 
+          relations: [] 
+        }],
+        [{ 
+          name: 'Other', 
+          renameOf: 'Missing', 
+          methods: [], 
+          relations: [] 
+        }],
+        [{ 
+          name: 'Missing', 
+          state: 'deleted', 
+          methods: [], 
+          relations: [] 
+        }],
+        [{ 
+          name: 'Other', 
+          renameOf: 'First', 
+          methods: [], 
+          relations: [] 
+        }, { name: 'First', methods: [], relations: [] }],
+      ];
+      const checkInvalidBatch: (invalid: unknown[]) => Promise<void> = async (invalid: unknown[]) => {
         assert.equal((await send(invalid)).status, 400);
         assert.deepEqual(await (await loggedFetch(`${base}/getClasses`)).json(), before);
-      }
+      };
+      const invalidBatchChecks: Promise<void> = invalidBatches.reduce<Promise<void>>(
+        async (previous: Promise<void>, invalid: unknown[]) => {
+          await previous;
+          await checkInvalidBatch(invalid);
+        },
+        Promise.resolve(),
+      );
+      await invalidBatchChecks;
     }));
 }

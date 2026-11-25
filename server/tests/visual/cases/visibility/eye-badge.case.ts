@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -29,20 +27,20 @@ export function registerEyeBadgeCase(): void {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
-    const badges: import("playwright").Locator =
+    const badges: Locator =
       page.locator("[data-eye-badge]");
     await page.waitForFunction(
       () => document.querySelectorAll("[data-eye-badge]").length === 2,
     );
     {
-      const __badgeValues: readonly import("playwright").Locator[] =
+      const __badgeValues: readonly Locator[] =
         await badges.all();
       for (
         let __badgeIndex: number = 0;
         __badgeIndex < __badgeValues.length;
         __badgeIndex += 1
       ) {
-        const badge: import("playwright").Locator =
+        const badge: Locator =
           __badgeValues[__badgeIndex]!;
         const info: {
           readonly text: Node["textContent"];

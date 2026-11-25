@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -8,10 +9,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -29,7 +27,7 @@ export function registerUndoDeleteMethodCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
-    const methodLine: import("playwright").Locator = editor
+    const methodLine: Locator = editor
       .locator(".cm-line")
       .filter({
         hasText: "addClass(name: string, publicMethods: string[])",
@@ -63,7 +61,7 @@ export function registerUndoDeleteMethodCase(): void {
       "connectClasses",
       "recalcLayout",
     ]);
-    const restored: import("playwright").Locator = page.locator(
+    const restored: Locator = page.locator(
       '[data-class-name="ClassDiagram"] [data-method-index="0"]',
     );
     assert.equal(
@@ -71,7 +69,7 @@ export function registerUndoDeleteMethodCase(): void {
       "addClass(name, publicMethods)\n-name: string\n-publicMethods: ✏️string[]",
     );
     await restored.hover();
-    const tooltip: import("playwright").Locator = page.getByRole("tooltip");
+    const tooltip: Locator = page.getByRole("tooltip");
     await tooltip.waitFor();
     const content: string = ((await tooltip.textContent()) ?? "").replace(
       /\s+/g,

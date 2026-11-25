@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "toggles a graph class markup and eye badge when clicked",
@@ -27,7 +25,7 @@ export function registerClickToggleCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
-    const target: import("playwright").Locator = page.locator(
+    const target: Locator = page.locator(
       '[data-class-name="Class"]',
     );
     assert.equal(await target.locator("[data-eye-badge]").count(), 0);

@@ -1,3 +1,4 @@
+import type { HistoryMemberT, HistoryRelationT } from "../support/class-history-support.js";
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loggedFetch } from '../../../dist/server_utils.js';
@@ -65,20 +66,20 @@ export function registerClassHistoryDeltasCase(): void {
       
     };
     await update(base, third, USER);
-    const current = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
+    const current: CurrentClassDtoT[] = (await (await loggedFetch(`${base}/getClasses`)).json() as { classes: CurrentClassDtoT[] }).classes;
     assert.deepEqual(current, [classData(third)]);
-    const response = await loggedFetch(`${base}/getClassesHistory`, {
+    const response: Response = await loggedFetch(`${base}/getClassesHistory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ classNames: ['Notebook'] }),
     });
     assert.equal(response.status, 200);
-    const classes = await response.json() as ClassHistoryT[];
-    const record = classes.find((item) => item.name === 'Notebook');
+    const classes: ClassHistoryT[] = await response.json() as ClassHistoryT[];
+    const record: ClassHistoryT | undefined = classes.find((item) => item.name === 'Notebook');
     assert.ok(record);
-    const heading = record.methods.find((item) => item.name === 'heading');
-    const find = record.methods.find((item) => item.name === 'find');
-    const entries = record.relations.find((item) => item.name === 'entries');
+    const heading: HistoryMemberT | undefined = record.methods.find((item) => item.name === 'heading');
+    const find: HistoryMemberT | undefined = record.methods.find((item) => item.name === 'find');
+    const entries: HistoryRelationT | undefined = record.relations.find((item) => item.name === 'entries');
     assert.ok(heading && find && entries);
     assert.equal(heading.status, 'deleted');
     assert.equal(entries.status, 'deleted');

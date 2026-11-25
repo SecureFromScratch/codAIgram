@@ -1,3 +1,4 @@
+import type { RevisionResult } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
@@ -20,7 +21,8 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerRevisionInvalidReferenceCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    const created = reviseClass(INITIAL, undefined, SCAN);
+    // UNTRUST-ALLOW-NULLISH: This case creates the class's first revision, so the reducer must receive no previous snapshot and record an initial state.
+    const created: RevisionResult = reviseClass(INITIAL, undefined, SCAN);
     const invalid: ClassUpdate = {
       name: 'Notebook',
       methods: [{ name: 'search', modifies: 'missing', overloads: [] }],

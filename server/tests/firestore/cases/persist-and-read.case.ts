@@ -10,15 +10,13 @@ import {
 } from "../../../dist/firestore-repository.js";
 import { INITIAL_CLASSES } from "../../../dist/memory-class-repository.js";
 import type { ClassDetails } from "../../../dist/memory-repository.js";
+import type { ClassUpdate } from "../../../dist/class-revision.js";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
     reason: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "persists a batch which the details route reads",
@@ -35,7 +33,10 @@ export function registerPersistAndReadCase(): void {
     const collection: string = `codaigram_test_${randomUUID().replaceAll("-", "")}`;
     const added: ClassDetails = {
       name: "IntegrationAdded",
-      methods: [{ name: "save", overloads: [[{ arg: "value", t: "string" }]] }],
+      methods: [{ 
+        name: "save", 
+        overloads: [[{ arg: "value", t: "string" }]] 
+      }],
       relations: [],
       
     };
@@ -71,20 +72,24 @@ export function registerPersistAndReadCase(): void {
           relations: [],
           
         };
+        const apiClasses: ClassUpdate[] = [added, changed].map((item: ClassDetails) => {
+          const mapped: ClassUpdate = {
+            name: item.name,
+            methods: item.methods.map((member) => ({
+              name: member.name,
+              overloads: member.overloads.map((args) => ({ args })),
+            })),
+            relations: item.relations,
+          };
+          if (item.state) mapped.state = item.state;
+          return mapped;
+        });
         const update: Response = await loggedFetch(`${base}/updateClasses`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             origin: { kind: 'user', name: 'firestore-test', version: 'v1' },
-            classes: [added, changed].map((item: ClassDetails) => ({
-              name: item.name,
-              methods: item.methods.map((member) => ({
-                name: member.name,
-                overloads: member.overloads.map((args) => ({ args })),
-              })),
-              relations: item.relations,
-              ...(item.state ? { state: item.state } : {}),
-            })),
+            classes: apiClasses,
           }),
         });
         assert.equal(update.status, 200);

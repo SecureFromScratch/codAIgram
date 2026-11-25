@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
@@ -6,10 +7,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "displays a red wavy diagnostic for a missing class name",
@@ -27,7 +25,7 @@ export function registerMissingClassNameCase(): void {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(text.replace(/^ClassDiagram/, ""));
-    const missing: import("playwright").Locator =
+    const missing: Locator =
       editor.locator(".dsl-missing-class");
     await missing.waitFor();
     const style: {

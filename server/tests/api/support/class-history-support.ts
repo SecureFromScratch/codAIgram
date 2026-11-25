@@ -38,14 +38,12 @@ export type ClassDtoT = {
 };
 export type CurrentClassDtoT = {
   name: string;
-  methods: {
-    name: string;
-    overloads: { arg: string; t: string }[][];
-  }[];
+  methods: { name: string; overloads: { arg: string; t: string }[][]; }[];
   relations: {
     kind: 'OWNS' | 'REF';
     name: string;
     target: string;
+    // UNTRUST-ALLOW-BOOLEAN: The current class DTO API persists boolean multiplicity; keep this test fixture aligned with that legacy wire shape until the API contract changes.
     many: boolean;
   }[];
   state?: 'partial' | 'deleted';
@@ -105,7 +103,12 @@ export async function update(base: string, value: ClassDtoT, origin: OriginT): P
       return relation;
     }),
   };
-  const wire: { name: string; methods: MemberUpdate[]; relations: RelationUpdate[]; state?: 'partial' | 'deleted' } = {
+  const wire: { 
+    name: string; 
+    methods: MemberUpdate[]; 
+    relations: RelationUpdate[]; 
+    state?: 'partial' | 'deleted' 
+  } = {
     name: snapshot.name,
     methods: snapshot.methods,
     relations: snapshot.relations,

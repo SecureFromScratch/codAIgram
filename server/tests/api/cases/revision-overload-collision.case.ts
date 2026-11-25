@@ -1,3 +1,4 @@
+import type { RevisionResult } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
@@ -32,7 +33,8 @@ export function registerRevisionOverloadCollisionCase(): void {
       relations: [],
       
     };
-    const current = reviseClass(initial, undefined, SCAN);
+    // UNTRUST-ALLOW-NULLISH: This case creates the class's first revision, so the reducer must receive no previous snapshot and record an initial state.
+    const current: RevisionResult = reviseClass(initial, undefined, SCAN);
     const conflicting: ClassUpdate = {
       name: 'Notebook',
       methods: [{

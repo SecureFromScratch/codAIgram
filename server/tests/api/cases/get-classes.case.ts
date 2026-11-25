@@ -11,10 +11,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "returns every class and its complete details",
@@ -32,7 +29,10 @@ export const TEST_CASE_METADATA: {
 
 const CATALOG: ClassDetails = {
   name: "Catalog",
-  methods: [{ name: "find", overloads: [[{ arg: "name", t: "string" }]] }],
+  methods: [{ 
+    name: "find", 
+    overloads: [[{ arg: "name", t: "string" }]] 
+  }],
   relations: [{
     kind: "REF",
     name: "entries",

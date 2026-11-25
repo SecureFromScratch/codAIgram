@@ -17,7 +17,9 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 type ChangeResponseT = {
   classes: { name: string; state?: 'partial' | 'deleted' }[];
-  lastChange: { classes: { name: string; status: string; renameOf?: string }[] };
+  lastChange: { 
+    classes: { name: string; status: string; renameOf?: string }[] 
+  };
 };
 
 export function registerClassRenameDeleteCase(): void {
@@ -26,18 +28,42 @@ export function registerClassRenameDeleteCase(): void {
         const response: Response = await loggedFetch(`${base}/updateClasses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ origin: { kind: 'scan', name: 'scanner', version }, classes: [value] }),
+          body: JSON.stringify({ 
+            origin: { kind: 'scan', name: 'scanner', version }, 
+            classes: [value] 
+          }),
         });
         assert.equal(response.status, 200);
       }
-      const methods = [{ name: 'find', overloads: [{ args: [{ arg: 'name', t: 'string' }] }] }];
-      await update({ name: 'Original', methods, relations: [], state: 'partial' }, 'v1');
-      await update({ name: 'Renamed', renameOf: 'Original', methods, relations: [] }, 'v2');
+      const methods: { 
+        name: string; 
+        overloads: { args: { arg: string; t: string; }[]; }[]; 
+      }[] = [{ 
+        name: 'find', 
+        overloads: [{ args: [{ arg: 'name', t: 'string' }] }] 
+      }];
+      await update({ 
+        name: 'Original', 
+        methods, 
+        relations: [], 
+        state: 'partial' 
+      }, 'v1');
+      await update({ 
+        name: 'Renamed', 
+        renameOf: 'Original', 
+        methods, 
+        relations: [] 
+      }, 'v2');
       let current: ChangeResponseT = await (await loggedFetch(`${base}/getClasses`)).json() as ChangeResponseT;
       assert.deepEqual(current.classes.map((item) => item.name), ['Renamed']);
-      assert.equal(current.classes[0]?.state, undefined);
+      assert.equal(current.classes[0] && "state" in current.classes[0], false);
       assert.equal(current.lastChange.classes[0]?.renameOf, 'Original');
-      await update({ name: 'Renamed', methods: [], relations: [], state: 'deleted' }, 'v3');
+      await update({ 
+        name: 'Renamed', 
+        methods: [], 
+        relations: [], 
+        state: 'deleted' 
+      }, 'v3');
       current = await (await loggedFetch(`${base}/getClasses`)).json() as ChangeResponseT;
       assert.equal(current.classes[0]?.state, 'deleted');
       assert.equal(current.lastChange.classes[0]?.status, 'deleted');
@@ -47,7 +73,15 @@ export function registerClassRenameDeleteCase(): void {
         body: JSON.stringify({ classNames: ['Renamed'] }),
       });
       assert.equal(response.status, 200);
-      const history: { name: string; renames: { from: string; to: string; origin: { version: string } }[]; methods: { name: string; history: { origin: { version: string } }[] }[] }[] = await response.json() as { name: string; renames: { from: string; to: string; origin: { version: string } }[]; methods: { name: string; history: { origin: { version: string } }[] }[] }[];
+      const history: { 
+        name: string; 
+        renames: { from: string; to: string; origin: { version: string } }[]; 
+        methods: { name: string; history: { origin: { version: string } }[] }[] 
+      }[] = await response.json() as { 
+        name: string; 
+        renames: { from: string; to: string; origin: { version: string } }[]; 
+        methods: { name: string; history: { origin: { version: string } }[] }[] 
+      }[];
       assert.equal(history[0]?.name, 'Renamed');
       assert.deepEqual(history[0]?.renames.map((item) => [item.from, item.to, item.origin.version]), [['Original', 'Renamed', 'v2']]);
       assert.deepEqual(history[0]?.methods.find((item) => item.name === 'find')?.history.map((item) => item.origin.version), ['v1', 'v3']);

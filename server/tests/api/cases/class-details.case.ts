@@ -9,10 +9,7 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "returns requested class details",

@@ -1,3 +1,6 @@
+import type { TestCaseMetadata } from "../../test-case-metadata.js";
+import type { ClassHistory } from "../../../dist/class-revision.js";
+import type { DatabaseClassChange } from "../../../dist/memory-repository.js";
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
@@ -5,8 +8,11 @@ import { createLocalFirestore, FirestoreClassRepository } from '../../../dist/fi
 import { createApp } from '../../../dist/app.js';
 import { loggedFetch } from '../../../dist/server_utils.js';
 import type { ClassOrigin, ClassUpdate } from '../../../dist/class-revision.js';
+import type { Server } from 'node:net';
 
-export const TEST_CASE_METADATA = {
+type ServerAddressT = ReturnType<Server["address"]>;
+
+export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: 'preserves class identity and history through Firestore renames and deletion',
   prompt: {
     availability: 'available',
@@ -25,7 +31,10 @@ export function registerClassRenameDeleteCase(): void {
       const first: ClassUpdate = {
         name: 'Original',
         state: 'partial',
-        methods: [{ name: 'find', overloads: [{ args: [{ arg: 'name', t: 'string' }] }] }],
+        methods: [{ 
+          name: 'find', 
+          overloads: [{ args: [{ arg: 'name', t: 'string' }] }] 
+        }],
         relations: [],
       };
       try {
@@ -50,25 +59,41 @@ export function registerClassRenameDeleteCase(): void {
         assert.deepEqual((await reopened.getClassSnapshots("mock-project")).map((item) => item.name), ['Final']);
         assert.equal((await reopened.getClassSnapshots("mock-project"))[0]?.nonCryptoGuid, id);
         assert.deepEqual(await reopened.getDetails("mock-project", ['Original', 'Renamed']), []);
-        const history = await reopened.getClassHistory("mock-project", ['Final']);
+        const history: ClassHistory[] = await reopened.getClassHistory("mock-project", ['Final']);
         assert.deepEqual(history[0]?.renames.map((item) => [item.from, item.to]), [['Original', 'Renamed'], ['Renamed', 'Final']]);
         assert.equal(history[0]?.methods[0]?.history[0]?.origin.version, 'v1');
-        const before = await reopened.getLastClassChange("mock-project");
+        const before: DatabaseClassChange | undefined = await reopened.getLastClassChange("mock-project");
         await assert.rejects(reopened.updateClassSnapshots("mock-project", [{ name: 'Original', methods: [], relations: [] }], origin));
-        await assert.rejects(reopened.updateClassSnapshots("mock-project", [{ name: 'Missing', renameOf: 'Unknown', methods: [], relations: [] }], origin));
+        await assert.rejects(reopened.updateClassSnapshots("mock-project", [{ 
+          name: 'Missing', 
+          renameOf: 'Unknown', 
+          methods: [], 
+          relations: [] 
+        }], origin));
         assert.deepEqual(await reopened.getLastClassChange("mock-project"), before);
-        await reopened.updateClassSnapshots("mock-project", [{ name: 'Final', state: 'deleted', methods: [], relations: [] }], { kind: 'scan', name: 'scanner', version: 'v4' });
+        await reopened.updateClassSnapshots("mock-project", [{ 
+          name: 'Final', 
+          state: 'deleted', 
+          methods: [], 
+          relations: [] 
+        }], { kind: 'scan', name: 'scanner', version: 'v4' });
         assert.equal((await reopened.getClassSnapshots("mock-project"))[0]?.state, 'deleted');
         assert.equal((await reopened.getClassHistory("mock-project", ['Final']))[0]?.methods[0]?.status, 'deleted');
         assert.equal((await reopened.getLastClassChange("mock-project"))?.classes?.[0]?.status, 'deleted');
         const server: ReturnType<ReturnType<typeof createApp>['listen']> = createApp(reopened).listen(0, '127.0.0.1');
         try {
           await new Promise<void>((resolve) => server.once('listening', resolve));
-          const address: ReturnType<typeof server.address> = server.address();
+          const address: ServerAddressT = server.address();
           assert.ok(address && typeof address !== 'string');
         const response: Response = await loggedFetch(`http://127.0.0.1:${address.port}/api/mock-project/getClasses`);
           assert.equal(response.status, 200);
-          const body: { classes: { name: string; state?: string }[]; lastChange: { classes: { status: string }[] } } = await response.json() as { classes: { name: string; state?: string }[]; lastChange: { classes: { status: string }[] } };
+          const body: { 
+            classes: { name: string; state?: string }[]; 
+            lastChange: { classes: { status: string }[] } 
+          } = await response.json() as { 
+            classes: { name: string; state?: string }[]; 
+            lastChange: { classes: { status: string }[] } 
+          };
           assert.deepEqual(body.classes.map((item) => [item.name, item.state]), [['Final', 'deleted']]);
           assert.equal(body.lastChange.classes[0]?.status, 'deleted');
         } finally {

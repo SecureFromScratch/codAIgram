@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, setVisualClasses } from "../../test-support.js";
@@ -13,10 +14,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/18 09:35",
-        text: "add test: right clicking a classbox opens a context-menu. add test: the context-menu has an option called Edit chain (search by label, don't depend on its index). choosing it loads the clicked class first and all recursively connected classes into the editor using a DFS-style search; order after the first class is not important.",
-      },
+      { when: "2026/11/18 09:35", text: "add test: right clicking a classbox opens a context-menu. add test: the context-menu has an option called Edit chain (search by label, don't depend on its index). choosing it loads the clicked class first and all recursively connected classes into the editor using a DFS-style search; order after the first class is not important.", },
     ],
   },
 };
@@ -28,8 +26,18 @@ export function registerEditChainContextMenuCase(): void {
         name: "Root",
         methods: [],
         relations: [
-          { kind: "OWNS", name: "first", target: "ChildA", many: false },
-          { kind: "REF", name: "second", target: "ChildB", many: false },
+          { 
+            kind: "OWNS", 
+            name: "first", 
+            target: "ChildA", 
+            many: false 
+          },
+          { 
+            kind: "REF", 
+            name: "second", 
+            target: "ChildB", 
+            many: false 
+          },
         ],
       },
       {
@@ -49,19 +57,13 @@ export function registerEditChainContextMenuCase(): void {
     await page.locator('[data-class-name="Root"]').waitFor();
 
     await page.locator('[data-class-name="Root"]').click({ button: "right" });
-    const menu: import("playwright").Locator = page.getByRole("menu", {
-      name: "Class actions",
-    });
+    const menu: Locator = page.getByRole("menu", { name: "Class actions", });
     await menu.waitFor();
-    const editChain: import("playwright").Locator = menu.getByRole("menuitem", {
-      name: "Edit chain",
-    });
+    const editChain: Locator = menu.getByRole("menuitem", { name: "Edit chain", });
     await editChain.waitFor();
     await editChain.click();
 
-    const editor: import("playwright").Locator = page.getByRole("textbox", {
-      name: "Diagram text",
-    });
+    const editor: Locator = page.getByRole("textbox", { name: "Diagram text", });
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("ChildA") === true,
     );

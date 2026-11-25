@@ -1,5 +1,7 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { logAndThrow } from "../../logging.js";
 import { page } from "../../test-support.js";
 import { resetOwnershipEditor } from "../../support/editor-support.js";
 
@@ -14,10 +16,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/18 09:35",
-        text: "add test: changing a field like description: Readonly<ValueDescription> to description: <ValueDescription> is a syntax error (cannot have angular brackets without preceding identifer). Another test: partial angular brackets (<Something or Something>) is a syntax error",
-      },
+      { when: "2026/11/18 09:35", text: "add test: changing a field like description: Readonly<ValueDescription> to description: <ValueDescription> is a syntax error (cannot have angular brackets without preceding identifer). Another test: partial angular brackets (<Something or Something>) is a syntax error", },
     ],
   },
 };
@@ -33,7 +32,8 @@ export function registerGenericPropertyTypeCase(): void {
       "Something>",
     ];
 
-    for (const invalidType of invalidPropertyTypes) {
+    for (let index: number = 0; index < invalidPropertyTypes.length; index += 1) {
+      const invalidType: string = invalidPropertyTypes[index] ?? logAndThrow(new Error("Missing invalid property type fixture."));
       const invalidSource: string = validSource.replace(
         "Readonly<ValueDescription>",
         invalidType,
@@ -41,7 +41,7 @@ export function registerGenericPropertyTypeCase(): void {
       await editor.fill(invalidSource);
 
       const invalidField: string = `description: ${invalidType}`;
-      const diagnostic: import("playwright").Locator = editor
+      const diagnostic: Locator = editor
         .locator(".dsl-error")
         .filter({ hasText: invalidField });
       await diagnostic.waitFor();

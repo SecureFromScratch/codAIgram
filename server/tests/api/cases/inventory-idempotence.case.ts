@@ -15,21 +15,26 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
   },
 };
 
+type TestInventoryEntryT = {
+  group: string;
+  name: string;
+  description: string;
+  lastChangedAt: string;
+};
+
 export function registerInventoryIdempotenceCase(): void {
   test(TEST_CASE_METADATA.title, async () => withServer(async (base) => {
     assert.equal((await post(base, 'updateTests', INITIAL_TESTS)).status, 200);
     assert.equal((await post(base, 'updateTests', UPDATED_TESTS)).status, 200);
     assert.equal((await post(base, 'updateTests', UPDATED_TESTS)).status, 200);
-    const response = await loggedFetch(`${base}/getTests`);
+    const response: Response = await loggedFetch(`${base}/getTests`);
     assert.equal(response.status, 200);
-    const entries = await response.json() as {
-      group: string;
-      name: string;
-      description: string;
-      lastChangedAt: string
-    }[];
+    const entries: TestInventoryEntryT[] = await response.json() as TestInventoryEntryT[];
     assert.equal(entries.length, 3);
     assert.deepEqual(entries.map(x => [x.group, x.name, x.description]), [['model', 'keep', 'kept'], ['model', 'edit', 'revised'], ['model', 'new', 'new']]);
-    for (const entry of entries) { assert.ok(!('prompt' in entry)); assert.ok(!Number.isNaN(Date.parse(entry.lastChangedAt))); }
+    entries.forEach((entry: TestInventoryEntryT) => {
+      assert.ok(!('prompt' in entry));
+      assert.ok(!Number.isNaN(Date.parse(entry.lastChangedAt)));
+    });
   }));
 }

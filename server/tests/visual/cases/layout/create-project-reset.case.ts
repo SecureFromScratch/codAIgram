@@ -22,8 +22,7 @@ export function registerCreateProjectResetCase(): void {
     await dialog.waitFor({ state: "detached" });
 
     await page.waitForFunction(() => {
-      const projectSelect: HTMLSelectElement | null = document.querySelector(".project-selector");
-      return projectSelect?.value === "VisualCreatedProject";
+      return document.querySelector<HTMLSelectElement>(".project-selector")?.value === "VisualCreatedProject";
     });
     assert.equal(await selector.inputValue(), "VisualCreatedProject");
     assert.ok(await selector.locator("option").getByText("VisualCreatedProject", { exact: true }).count() === 1);

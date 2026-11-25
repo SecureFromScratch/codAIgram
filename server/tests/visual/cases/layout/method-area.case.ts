@@ -6,10 +6,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "keeps method text below the header and within class borders",
@@ -28,10 +25,10 @@ export function registerMethodAreaCase(): void {
       await inspectDiagram("ClassDiagram", "Class");
     {
       const __memberValues: readonly string[] = [
-        "addClass",
-        "addPartialClass",
-        "connectClasses",
-        "recalcLayout",
+        "addClass()",
+        "addPartialClass()",
+        "connectClasses()",
+        "recalcLayout()",
       ];
       for (
         let __memberIndex: number = 0;

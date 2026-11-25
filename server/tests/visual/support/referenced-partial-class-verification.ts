@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { logAndThrow } from "../logging.js";
 import { page } from "../test-support.js";
 import { resetOwnershipEditor } from "./editor-support.js";
 export async function verifyReferencedHiddenPartial(
@@ -8,7 +9,7 @@ export async function verifyReferencedHiddenPartial(
   const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
     await resetOwnershipEditor();
   const relation: string | undefined = text.split("\n").find((line: string) => line.startsWith("OWNS "));
-  if (!relation) throw new Error("Expected the ClassDiagram ownership relation.");
+  if (!relation) logAndThrow(new Error("Expected the ClassDiagram ownership relation."));
   const owner: string = text.replace(relation, `${reference}\n${relation}`);
   await editor.fill(`${owner}\n\n${name}`);
   await page.locator('[data-class-name="ClassDiagram"]').dblclick();

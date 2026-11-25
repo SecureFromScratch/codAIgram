@@ -1,3 +1,4 @@
+import type { RevisionResult } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -23,7 +24,8 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerRevisionStorageValidationCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    const created = reviseClass(INITIAL, undefined, SCAN, '2026-11-15T09:35:00Z');
+    // UNTRUST-ALLOW-NULLISH: This case creates the class's first revision, so the reducer must receive no previous snapshot and record an initial state.
+    const created: RevisionResult = reviseClass(INITIAL, undefined, SCAN, '2026-11-15T09:35:00Z');
     assert.deepEqual(parseStoredClassSnapshot(created.current), created.current);
     assert.throws(() => parseStoredClassSnapshot({
       name: 'Notebook',
@@ -48,7 +50,10 @@ export function registerRevisionStorageValidationCase(): void {
     const entries: { message?: string }[] = lines.map((line: string) => JSON.parse(line) as { message?: string });
     const entry: { message?: string } | undefined = entries.reverse().find((item: { message?: string }) => item.message?.includes('logging-validation-test'));
     assert.ok(entry?.message);
-    const details: { documentId: string; issues: { path: (string | number)[]; code: string }[] } = JSON.parse(entry.message.slice('Storage validation failed: '.length));
+    const details: { 
+      documentId: string; 
+      issues: { path: (string | number)[]; code: string }[] 
+    } = JSON.parse(entry.message.slice('Storage validation failed: '.length));
     assert.equal(details.documentId, 'logging-validation-test');
     assert.ok(details.issues.some((issue) => issue.path.includes('isPartial') && issue.code === 'invalid_type'));
     assert.ok(details.issues.some((issue) => issue.code === 'unrecognized_keys'));

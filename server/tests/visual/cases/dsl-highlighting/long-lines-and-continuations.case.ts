@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -6,10 +7,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -25,7 +23,7 @@ export const TEST_CASE_METADATA: {
 };
 export function registerLongLinesAndContinuationsCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    const editor: import("playwright").Locator = page.getByRole("textbox", { name: "Diagram text", });
+    const editor: Locator = page.getByRole("textbox", { name: "Diagram text", });
     const longName: string = "a".repeat(180);
     await editor.fill(
       `Diagram\n  f(\n    name: string,\n\n      count: integer\n    )\n  ${longName}()\nOWNS classes: Class[]`,
@@ -36,7 +34,7 @@ export function registerLongLinesAndContinuationsCase(): void {
           .querySelector(".status")
           ?.textContent?.includes("up to date") === true,
     );
-    const method: import("playwright").Locator = page
+    const method: Locator = page
       .locator('[data-class-name="Diagram"] [data-method-tooltip]')
       .first();
     await method.waitFor();

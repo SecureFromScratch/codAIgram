@@ -15,24 +15,28 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
   },
 };
 
+type HistoryEntryT = { when: string; text: string };
+type HistoryResultT = {
+  group: string;
+  name: string;
+  prompts: HistoryEntryT[];
+  descriptions: HistoryEntryT[];
+};
+
 export function registerInventoryHistoryQueryCase(): void {
   test(TEST_CASE_METADATA.title, async () => withServer(async (base) => {
     assert.equal((await post(base, 'updateTests', INITIAL_TESTS)).status, 200);
     assert.equal((await post(base, 'updateTests', UPDATED_TESTS)).status, 200);
     assert.equal((await post(base, 'updateTests', UPDATED_TESTS)).status, 200);
-    const response = await post(base, 'getHistory', [{ group: 'model', name: 'edit' }]);
+    const response: Response = await post(base, 'getHistory', [{ group: 'model', name: 'edit' }]);
     assert.equal(response.status, 200);
-    const result = await response.json() as {
-      group: string;
-      name: string;
-      prompts: { when: string; text: string }[];
-      descriptions: { when: string; text: string }[]
-    }[];
+    const result: HistoryResultT[] = await response.json() as HistoryResultT[];
     assert.equal(result.length, 1);
     assert.equal(result[0]?.group, 'model');
     assert.equal(result[0]?.name, 'edit');
     assert.deepEqual(result[0]?.prompts.map(item => item.text), ['first prompt', 'second prompt']);
     assert.deepEqual(result[0]?.descriptions.map(item => item.text), ['original', 'revised']);
-    for (const item of [...result[0]!.prompts, ...result[0]!.descriptions]) assert.ok(!Number.isNaN(Date.parse(item.when)));
+    const entries: readonly HistoryEntryT[] = [...result[0]!.prompts, ...result[0]!.descriptions];
+    entries.forEach((item: HistoryEntryT) => assert.ok(!Number.isNaN(Date.parse(item.when))));
   }));
 }

@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -28,7 +26,7 @@ export function registerRestoreExistingClassCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
-    const existing: "ExistingClass\n  field: string\n  run(value: number)" =
+    const existing: string =
       "ExistingClass\n  field: string\n  run(value: number)";
     await editor.fill(`${text}\n\n${existing}`);
     await page.locator('[data-class-name="ClassDiagram"]').dblclick();
@@ -40,7 +38,7 @@ export function registerRestoreExistingClassCase(): void {
       text,
     );
     await editor.fill(`${text}\n\nExistingClass`);
-    const conflict: import("playwright").Locator = editor
+    const conflict: Locator = editor
       .locator(".dsl-error")
       .filter({ hasText: "ExistingClass" });
     await conflict.first().waitFor();

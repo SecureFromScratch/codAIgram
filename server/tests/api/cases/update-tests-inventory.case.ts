@@ -9,10 +9,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "updates and adds tests inventory records",
@@ -86,7 +83,17 @@ export function registerUpdateTestsInventoryCase(): void {
       });
       assert.equal(response.status, 200);
       const read: Response = await loggedFetch(`${baseUrl}/getTests`);
-      const entries = await read.json() as { group: string; name: string; description: string; lastChangedAt: string }[];
+      const entries: { 
+        group: string; 
+        name: string; 
+        description: string; 
+        lastChangedAt: string; 
+      }[] = await read.json() as { 
+        group: string; 
+        name: string; 
+        description: string; 
+        lastChangedAt: string 
+      }[];
       assert.deepEqual(entries.map(({ group, name, description }) => ({ group, name, description })), [update[0]!, original[1]!, update[1]!].map(({ group, name, description }) => ({ group, name, description })));
       entries.forEach((entry) => { assert.ok(!('prompt' in entry)); assert.ok(!Number.isNaN(Date.parse(entry.lastChangedAt))); });
     } finally {

@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "displays only the double-clicked class text and its eye badge",
@@ -28,7 +26,7 @@ export function registerDoubleClickIsolateCase(): void {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(`${text}\n\nClass\n  isPartial: bool`);
-    const target: import("playwright").Locator = page.locator(
+    const target: Locator = page.locator(
       '[data-class-name="Class"]',
     );
     await target.dblclick();

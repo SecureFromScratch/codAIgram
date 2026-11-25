@@ -19,10 +19,12 @@ export const VISUAL_CLASSES: readonly ClassDetails[] = [
     methods: [
       {
         name: "addClass",
-        overloads: [[{ arg: "name", t: "string" }, { arg: "publicMethods", t: "string[]" }]] },
+        overloads: [[{ arg: "name", t: "string" }, { arg: "publicMethods", t: "string[]" }]] 
+      },
       {
         name: "addPartialClass",
-        overloads: [[{ arg: "name", t: "string" }]] },
+        overloads: [[{ arg: "name", t: "string" }]] 
+      },
       {
         name: "connectClasses",
         overloads: [[
@@ -30,21 +32,24 @@ export const VISUAL_CLASSES: readonly ClassDetails[] = [
         { arg: "to", t: "string" },
         { arg: "connectionType", t: "ConnectionType" },
         { arg: "arity", t: "integer" },
-      ]] },
+      ]] 
+      },
       { name: "recalcLayout", overloads: [[]] },
     ],
     relations: [{
       kind: "OWNS",
       name: "classes",
       target: "Class",
-      many: true }],
+      many: true 
+    }],
     
   },
   {
     name: "Class",
     methods: [],
     relations: [],
-    state: 'partial' },
+    state: 'partial' 
+  },
 ];
 
 class VisualMemoryRepository extends MemoryClassRepository {
@@ -63,7 +68,8 @@ class VisualMemoryRepository extends MemoryClassRepository {
   }
 
   override async getLastClassChange(projectName: string): Promise<DatabaseClassChange | undefined> {
-    return projectName === "mock-project" ? this.#lastChange : undefined;
+    if (projectName === "mock-project") return this.#lastChange;
+    return;
   }
 }
 
@@ -75,12 +81,14 @@ export async function setVisualClasses(classes: readonly ClassDetails[], lastCha
       group: "diagram",
       name: "renders-class",
       description: "renders a class diagram",
-      prompt: "Render a class diagram." },
+      prompt: "Render a class diagram." 
+    },
     {
       group: "repository",
       name: "stores-details",
       description: "stores class details",
-      prompt: "Store class details." },
+      prompt: "Store class details." 
+    },
   ]);
   const otherProjectClasses: readonly ClassDetails[] = [
     { name: "AnotherProjectClass", methods: [], relations: [] },
@@ -104,10 +112,13 @@ const visualRepository: ClassRepository & TestInventoryRepository = {
   updateTests: (projectName, tests) => repository.updateTests(projectName, tests),
 };
 
-export const VISUAL_FIXTURE_METADATA = {
+export const VISUAL_FIXTURE_METADATA: { prompt: { history: { when: string; text: string; }[]; }; } = {
   prompt: {
     history: [
-      { when: "2026/11/15 09:35", text: "for the current test suite use this definition of ClassDiagvram:\nClassDiagram\n  addClass(name: string, publicMethods: string[])\n  addPartialClass(name: string)\n  connectClasses(from: string, to: string, connectionType: ConnectionType, arity: integer)\n  recalcLayout()\nOWNS classes: Class[]\n\nalso - Class is a partial class.\n\nall tests should be agains the in-memory storage so we control the content." },
+      { 
+        when: "2026/11/15 09:35", 
+        text: "for the current test suite use this definition of ClassDiagvram:\nClassDiagram\n  addClass(name: string, publicMethods: string[])\n  addPartialClass(name: string)\n  connectClasses(from: string, to: string, connectionType: ConnectionType, arity: integer)\n  recalcLayout()\nOWNS classes: Class[]\n\nalso - Class is a partial class.\n\nall tests should be agains the in-memory storage so we control the content." 
+      },
     ],
   },
 };
@@ -129,7 +140,9 @@ export function registerVisualLifecycle(): void {
         host: "127.0.0.1",
         port: 41731,
         strictPort: true,
-        proxy: { "/api": `http://127.0.0.1:${String(apiAddress.port)}` },
+        proxy: { 
+          "/api": `http://127.0.0.1:${String(apiAddress.port)}` 
+        },
       },
     });
     await server.listen();
@@ -147,7 +160,10 @@ export function registerVisualLifecycle(): void {
   });
   beforeEach(async (context) => {
     logVisualEvent("INFO", `Starting test: ${context.name}`);
-    await page.evaluate(() => window.localStorage.removeItem("codaigram.editorPercent"));
+    await page.evaluate(() => {
+      window.localStorage.removeItem("codaigram.editorPercent");
+      window.localStorage.removeItem("codaigram.vscodeBridgeSession");
+    });
     await setVisualClasses(VISUAL_CLASSES);
     await page.reload();
     await page.locator(".canvas").first().waitFor({ timeout: 10000 });

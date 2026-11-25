@@ -1,3 +1,4 @@
+import type { RevisionResult } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
@@ -20,7 +21,8 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerRevisionDeletionsCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    const created = reviseClass(INITIAL, undefined, SCAN);
+    // UNTRUST-ALLOW-NULLISH: This case creates the class's first revision, so the reducer must receive no previous snapshot and record an initial state.
+    const created: RevisionResult = reviseClass(INITIAL, undefined, SCAN);
     const updated: ClassUpdate = {
       name: 'Notebook',
       methods: [{
@@ -33,7 +35,7 @@ export function registerRevisionDeletionsCase(): void {
       relations: [],
       
     };
-    const revised = reviseClass(updated, created.current, USER);
+    const revised: RevisionResult = reviseClass(updated, created.current, USER);
     assert.equal(revised.current.methods[0]?.origin.name, 'alice');
     assert.equal(revised.current.methods[0]?.overloads[0]?.origin.name, 'scanner');
     assert.equal(revised.current.methods[0]?.overloads[1]?.origin.name, 'alice');

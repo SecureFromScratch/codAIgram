@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loggedFetch } from '../../../dist/server_utils.js';
-import type { ClassChangeT } from '../../../dist/class-revision.js';
+import type { ClassChangeT, ClassOrigin, ClassUpdate } from '../../../dist/class-revision.js';
 import { runWithServer } from '../support/class-history-support.js';
 import type { TestCaseMetadata } from '../../test-case-metadata.js';
 
@@ -24,11 +24,14 @@ type ChangeResponseT = {
 
 export function registerClassLastDeltaCase(): void {
   test(TEST_CASE_METADATA.title, async () => runWithServer(async (base: string) => {
-    const origin = { kind: 'scan', name: 'scanner', version: 'first' };
-    const first = {
+    const origin: ClassOrigin = { kind: 'scan', name: 'scanner', version: 'first' };
+    const first: ClassUpdate = {
       name: 'Task',
       methods: [
-        { name: 'find', overloads: [{ args: [{ arg: 'key', t: 'string' }] }, { args: [{ arg: 'id', t: 'number' }] }] },
+        { 
+          name: 'find', 
+          overloads: [{ args: [{ arg: 'key', t: 'string' }] }, { args: [{ arg: 'id', t: 'number' }] }] 
+        },
         { name: 'obsolete', overloads: [{ args: [] }] },
       ],
       relations: [{ kind: 'REF', name: 'owner', target: 'User', many: false }],
@@ -38,7 +41,10 @@ export function registerClassLastDeltaCase(): void {
       const response: Response = await loggedFetch(`${base}/updateClasses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: { kind: origin.kind, name: origin.name, version }, classes }),
+        body: JSON.stringify({ 
+          origin: { kind: origin.kind, name: origin.name, version }, 
+          classes 
+        }),
       });
       assert.equal(response.status, 200);
     }
@@ -46,7 +52,13 @@ export function registerClassLastDeltaCase(): void {
     await update([{
       name: 'Task',
       methods: [
-        { name: 'find', overloads: [{ args: [{ arg: 'key', t: 'number' }], modifies: 'key: string' }, { args: [{ arg: 'active', t: 'boolean' }] }] },
+        { 
+          name: 'find', 
+          overloads: [{ 
+            args: [{ arg: 'key', t: 'number' }], 
+            modifies: 'key: string' 
+        }, { args: [{ arg: 'active', t: 'boolean' }] }] 
+        },
         { name: 'created', overloads: [{ args: [] }] },
       ],
       relations: [{ kind: 'REF', name: 'owner', target: 'Team', many: false }],
@@ -55,9 +67,9 @@ export function registerClassLastDeltaCase(): void {
     const result: ChangeResponseT = await (await loggedFetch(`${base}/getClasses`)).json() as ChangeResponseT;
     assert.equal(result.lastChange.origin.version, 'second');
     assert.deepEqual(result.lastChange.classes.map((item) => [item.name, item.status]), [['Task', 'modified'], ['NewClass', 'added']]);
-    const task = result.lastChange.classes[0];
+    const task: { name: string; status: string; changes: ClassChangeT[]; } | undefined = result.lastChange.classes[0];
     assert.ok(task);
-    const find = task.changes.find((item) => item.kind === 'member' && item.after !== 'absent' && item.after.name === 'find');
+    const find: ClassChangeT | undefined = task.changes.find((item) => item.kind === 'member' && item.after !== 'absent' && item.after.name === 'find');
     assert.ok(find && find.kind === 'member' && find.before !== 'absent' && find.after !== 'absent');
     assert.deepEqual(find.before.overloads.map((item) => item.args), [[{ arg: 'key', t: 'string' }], [{ arg: 'id', t: 'number' }]]);
     assert.deepEqual(find.after.overloads.map((item) => item.args), [[{ arg: 'key', t: 'number' }], [{ arg: 'active', t: 'boolean' }]]);

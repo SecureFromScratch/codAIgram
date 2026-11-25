@@ -3,15 +3,16 @@ import { test } from "node:test";
 import type { Locator } from "playwright";
 import { page } from "../../test-support.js";
 
+type ModelLookupResultT = { isOk: () => boolean; value?: unknown; };
+type ModelHookT = { tryGetModel: (name: string) => ModelLookupResultT; };
+type WindowWithModelHookT = Window & { __app?: ModelHookT; };
+
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "edits OWNS, REF, and UNK connections in the class editor",
@@ -32,17 +33,27 @@ export function registerRelationshipKindsCase(): void {
     await editor.fill(source);
     await page.locator('.canvas [data-class-name="Source"]').waitFor();
     const sourceModel: unknown = await page.evaluate(() => {
-      const app: { tryGetModel: (name: string) => { isOk: () => boolean; value?: unknown } } | undefined = (window as Window & { __app?: { tryGetModel: (name: string) => { isOk: () => boolean; value?: unknown } } }).__app;
-      const result = app?.tryGetModel("Source");
-      return result?.isOk() ? result.value : null;
+      const app: ModelHookT | undefined = (window as WindowWithModelHookT).__app;
+      const result: ModelLookupResultT | undefined = app?.tryGetModel("Source");
+      return result?.isOk() ? result.value : { error: "Source model was not available." };
     });
     assert.deepEqual(sourceModel, {
       name: "Source",
       methods: [],
       relations: [
         { kind: "OWNS", name: "owned", target: "Owned", many: true },
-        { kind: "REF", name: "reference", target: "Referenced", many: false },
-        { kind: "UNK", name: "unknown", target: "Unknown", many: true },
+        { 
+          kind: "REF", 
+          name: "reference", 
+          target: "Referenced", 
+          many: false 
+        },
+        { 
+          kind: "UNK", 
+          name: "unknown", 
+          target: "Unknown", 
+          many: true 
+        },
       ],
     });
     assert.ok((await page.locator(".canvas svg").count()) >= 1);

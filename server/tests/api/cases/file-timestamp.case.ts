@@ -8,23 +8,13 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: 'refreshes a scanned file timestamp without creating a class change',
   prompt: {
     availability: 'available',
-    history: [{
-      when: '2026/11/17 09:35',
-      text: 'updateClasses marks interfaces/classes as changed even if they did not and the only change is to their file timestamp. add a server api test - updateClasses + getClasses. make sure that sending an UNCHANGED class except for the timestamp of its file is not considered a change and not returned as a change. also add tests to existing tests using getClasses - getClasses and getClassesHistory to NOT report on a change that is only to the timestamp of a file. the goal of using file-timestamp is to be able to later create a "git status" like behaviour - so the timestamp should be updated but not considered a change.'
-    }],
+    history: [{ when: '2026/11/17 09:35', text: 'updateClasses marks interfaces/classes as changed even if they did not and the only change is to their file timestamp. add a server api test - updateClasses + getClasses. make sure that sending an UNCHANGED class except for the timestamp of its file is not considered a change and not returned as a change. also add tests to existing tests using getClasses - getClasses and getClassesHistory to NOT report on a change that is only to the timestamp of a file. the goal of using file-timestamp is to be able to later create a "git status" like behaviour - so the timestamp should be updated but not considered a change.' }],
   },
 };
 
 type ClassesResponseT = {
-  classes: {
-    name: string;
-    modifiedAt?: string;
-  }[];
-  lastChange?: {
-    origin: {
-      version: string;
-    };
-  };
+  classes: { name: string; modifiedAt?: string; }[];
+  lastChange?: { origin: { version: string; }; };
 };
 
 export function registerFileTimestampCase(): void {
@@ -34,19 +24,12 @@ export function registerFileTimestampCase(): void {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          origin: {
-            kind: 'scan',
-            name: 'scanner',
-            version,
-          },
+          origin: { kind: 'scan', name: 'scanner', version, },
           classes: [{
             name: 'ScannedClass',
             sourceFile: 'src/scanned-class.ts',
             modifiedAt,
-            methods: [{
-              name: 'run',
-              overloads: [{ args: [] }],
-            }],
+            methods: [{ name: 'run', overloads: [{ args: [] }], }],
             relations: [],
           }],
         }),

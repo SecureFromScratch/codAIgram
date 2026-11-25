@@ -1,15 +1,14 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
+import { logAndThrow } from "../../logging.js";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title:
@@ -27,17 +26,17 @@ export const TEST_CASE_METADATA: {
 };
 export function registerDslTokensCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
-    const editor: import("playwright").Locator = page.getByRole("textbox", { name: "Diagram text", });
+    const editor: Locator = page.getByRole("textbox", { name: "Diagram text", });
     await page.evaluate(() => {
       const app: { selectClass: (name: string) => void } | undefined =
         (window as Window & { __app?: { selectClass: (name: string) => void } }).__app;
-      if (!app) throw new Error("Application command hook is unavailable.");
+      if (!app) logAndThrow(new Error("Application command hook is unavailable."));
       app.selectClass("ClassDiagram");
     });
     await page.waitForFunction(
       () => document.querySelector(".cm-content .cm-line")?.textContent === "ClassDiagram",
     );
-    const heading: import("playwright").Locator = editor
+    const heading: Locator = editor
       .locator(".cm-line")
       .first()
       .locator(".dsl-class-name");
@@ -70,7 +69,7 @@ export function registerDslTokensCase(): void {
       await editor.locator(".dsl-type-keyword").first().innerText(),
       "string",
     );
-    const owns: import("playwright").Locator = editor.locator(".dsl-ownership");
+    const owns: Locator = editor.locator(".dsl-ownership");
     assert.equal(await owns.innerText(), "OWNS");
     const ownsStyle: {
       readonly style: string;
@@ -119,7 +118,7 @@ export function registerDslTokensCase(): void {
       "normal",
     );
     assert.equal(await editor.locator(".dsl-type").last().innerText(), "Class");
-    const updated: "Diagram\n  add(\n    value: Map<string, number>\n    )\nOWNS things: Thing[]" =
+    const updated: string =
       "Diagram\n  add(\n    value: Map<string, number>\n    )\nOWNS things: Thing[]";
     await editor.fill(updated);
     assert.equal(

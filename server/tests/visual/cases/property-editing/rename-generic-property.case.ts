@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, setVisualClasses } from "../../test-support.js";
@@ -7,20 +8,14 @@ export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "renames a generic property and updates its class box without a DSL error",
   prompt: {
     availability: "available",
     history: [
-      {
-        when: "2026/11/17 09:35",
-        text: "I changed the name of the property from description to desc1 and received a DSL message even though the property was valid; the editor showed no red wavy underline.",
-      },
+      { when: "2026/11/17 09:35", text: "I changed the name of the property from description to desc1 and received a DSL message even though the property was valid; the editor showed no red wavy underline.", },
     ],
   },
 };
@@ -56,11 +51,19 @@ export function registerRenameGenericPropertyCase(): void {
       {
         name: "ArchetypeContext",
         methods: [
-          { name: "typeName", overloads: [[{ arg: "+RO", t: "string" }]] },
+          { 
+            name: "typeName", 
+            overloads: [[{ arg: "+RO", t: "string" }]] 
+          },
         ],
         relations: [],
       },
-      { name: "ValueDescription", methods: [], relations: [], state: "partial" },
+      { 
+        name: "ValueDescription", 
+        methods: [], 
+        relations: [], 
+        state: "partial" 
+      },
     ]);
 
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
@@ -73,7 +76,7 @@ export function registerRenameGenericPropertyCase(): void {
 
     await editor.fill(editedText);
     await page.getByText("Diagram is up to date", { exact: true }).waitFor();
-    const classBox: import("playwright").Locator = page.locator(
+    const classBox: Locator = page.locator(
       '[data-class-name="Archetype"]',
     );
     await page.waitForFunction(() =>

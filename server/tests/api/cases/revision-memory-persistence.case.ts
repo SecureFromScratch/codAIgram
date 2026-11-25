@@ -1,3 +1,4 @@
+import type { CurrentClass, ClassHistory } from "../../../dist/class-revision.js";
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { rebuildClassHistory, reviseClass } from '../../../dist/class-revision.js';
@@ -21,18 +22,14 @@ export const TEST_CASE_METADATA: TestCaseMetadata = {
 
 export function registerRevisionMemoryPersistenceCase(): void {
   it(TEST_CASE_METADATA.title, async () => {
-    const repository = new MemoryClassRepository([]);
+    const repository: MemoryClassRepository = new MemoryClassRepository([]);
     await repository.updateClassSnapshots("mock-project", [INITIAL], SCAN);
-    const first = await repository.getClassSnapshots("mock-project");
+    const first: CurrentClass[] = await repository.getClassSnapshots("mock-project");
     assert.match(first[0]?.nonCryptoGuid ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     await repository.updateClassSnapshots("mock-project", [INITIAL], USER);
     assert.deepEqual(await repository.getClassSnapshots("mock-project"), first);
-    await repository.updateClassSnapshots("mock-project", [{
-      name: 'Notebook',
-      methods: [],
-      relations: [],
-      }], USER);
-    const history = await repository.getClassHistory("mock-project", ['Notebook']);
+    await repository.updateClassSnapshots("mock-project", [{ name: 'Notebook', methods: [], relations: [], }], USER);
+    const history: ClassHistory[] = await repository.getClassHistory("mock-project", ['Notebook']);
     assert.equal((await repository.getClassSnapshots("mock-project"))[0]?.nonCryptoGuid, first[0]?.nonCryptoGuid);
     assert.equal(history[0]?.methods[0]?.status, 'deleted');
     assert.equal(history[0]?.relations[0]?.status, 'deleted');

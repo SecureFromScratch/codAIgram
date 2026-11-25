@@ -6,15 +6,13 @@ import { createApp } from "../../../dist/app.js";
 import { MemoryClassRepository } from "../../../dist/memory-class-repository.js";
 import type { ClassDetails } from "../../../dist/memory-repository.js";
 import { JsonMap } from "@codaigram/shared/json-map";
+import type { ArgsListT } from "@codaigram/shared/class-types";
 export const TEST_CASE_METADATA: {
   title: string;
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "updates classes with every structured member form",
@@ -29,6 +27,17 @@ export const TEST_CASE_METADATA: {
       { when: "2026/11/16 00:00", text: "add a server test - calling getRevisionIds(howFarBack) - returns a reverse datetime ordered list of the revision names stored when updates were perrformed. combine this either as part-of or right-after the tests performing an updateClasses to se if the new revision id is returned. howFarBack of 0 returns latest revision id. after you have theses new tests, add logic to test this also with the mock project tests in scanner. then - finally - you can use this definition for the visual tests.\npencil emoji means arguments are reference-type and mutable. if server doesn't have it yet - add a test to the server that args can be marked as either mutable (m), immutable (x), or readonly (r)" },
     ],
   },
+};
+type ApiClassUpdateOverloadT = { args: ArgsListT; };
+type ApiClassUpdateMethodT = { name: string; overloads: ApiClassUpdateOverloadT[]; };
+type ApiClassUpdateT = {
+  name: string;
+  usage?: ClassDetails['usage'];
+  sourceFile?: string;
+  modifiedAt?: string;
+  methods: ApiClassUpdateMethodT[];
+  relations: ClassDetails['relations'];
+  state?: ClassDetails['state'];
 };
 export function registerUpdateClassesCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
@@ -48,11 +57,14 @@ export function registerUpdateClassesCase(): void {
           sourceFile: "src/new-class.ts",
           modifiedAt: "2026-11-15T09:35:00.000Z",
           methods: [
-            { name: "run", overloads: [[
+            { 
+              name: "run", 
+              overloads: [[
               { arg: "values", t: "string[]", mutability: "m" },
               { arg: "value", t: "string", mutability: "x" },
               { arg: "items", t: "readonly string[]", mutability: "r" },
-            ]] },
+            ]] 
+            },
             {
               name: "lookup",
               overloads: [
@@ -60,9 +72,18 @@ export function registerUpdateClassesCase(): void {
                 [{ arg: "index", t: "number" }],
               ],
             },
-            { name: "identifier", overloads: [[{ arg: "+RO", t: "string" }]] },
-            { name: "enabled", overloads: [[{ arg: "+RW", t: "boolean" }]] },
-            { name: "status", overloads: [[{ arg: "+PROP", t: "Status" }]] },
+            { 
+              name: "identifier", 
+              overloads: [[{ arg: "+RO", t: "string" }]] 
+            },
+            { 
+              name: "enabled", 
+              overloads: [[{ arg: "+RW", t: "boolean" }]] 
+            },
+            { 
+              name: "status", 
+              overloads: [[{ arg: "+PROP", t: "Status" }]] 
+            },
             {
               name: "configuration",
               overloads: [[{
@@ -103,23 +124,27 @@ export function registerUpdateClassesCase(): void {
           
         },
       ];
+      const apiUpdates: ApiClassUpdateT[] = updates.map((item) => {
+        const mapped: ApiClassUpdateT = {
+          name: item.name,
+          methods: item.methods.map((member) => ({
+            name: member.name,
+            overloads: member.overloads.map((args) => ({ args })),
+          })),
+          relations: item.relations,
+        };
+        if (item.usage) mapped.usage = item.usage;
+        if (item.sourceFile) mapped.sourceFile = item.sourceFile;
+        if (item.modifiedAt) mapped.modifiedAt = item.modifiedAt;
+        if (item.state) mapped.state = item.state;
+        return mapped;
+      });
       const response: Response = await loggedFetch(`${base}/updateClasses`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origin: { kind: 'user', name: 'api-test', version: 'v1' },
-          classes: updates.map((item) => ({
-            name: item.name,
-            ...(item.usage ? { usage: item.usage } : {}),
-            ...(item.sourceFile ? { sourceFile: item.sourceFile } : {}),
-            ...(item.modifiedAt ? { modifiedAt: item.modifiedAt } : {}),
-            methods: item.methods.map((member) => ({
-              name: member.name,
-              overloads: member.overloads.map((args) => ({ args })),
-            })),
-            relations: item.relations,
-            ...(item.state ? { state: item.state } : {}),
-          })),
+          classes: apiUpdates,
         }),
       });
       assert.equal(response.status, 200);

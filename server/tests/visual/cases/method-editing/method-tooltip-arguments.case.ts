@@ -1,3 +1,4 @@
+import type { Locator } from "playwright";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page } from "../../test-support.js";
@@ -7,10 +8,7 @@ export const TEST_CASE_METADATA: {
   prompt: {
     availability: string;
     [archivedField: string]: unknown;
-    history: {
-      when: string;
-      text: string;
-    }[];
+    history: { when: string; text: string; }[];
   };
 } = {
   title: "updates method tooltip argument names, types, and count",
@@ -33,7 +31,7 @@ export function registerMethodTooltipArgumentsCase(): void {
         "addClass(label: number, option: boolean, items: Item[])",
       ),
     );
-    const method: import("playwright").Locator = page.locator(
+    const method: Locator = page.locator(
       '[data-class-name="ClassDiagram"] [data-method-tooltip^="addClass("]',
     );
     await page.waitForFunction(
@@ -44,7 +42,7 @@ export function registerMethodTooltipArgumentsCase(): void {
         "addClass(label, option, items)\n-label: number\n-option: boolean\n-items: ✏️Item[]",
     );
     await method.hover();
-    const tooltip: import("playwright").Locator = page.getByRole("tooltip");
+    const tooltip: Locator = page.getByRole("tooltip");
     await tooltip.waitFor();
     const content: string = ((await tooltip.textContent()) ?? "").replace(
       /\s+/g,
