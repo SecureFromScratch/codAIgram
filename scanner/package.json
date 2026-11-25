@@ -4,11 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "dependencies": {
-    "@codaigram/shared": "0.1.0"
+    "@codaigram/shared": "0.1.0",
+    "@codaigram/scan-shared": "file:../scan_shared"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test:flows": "npm run build && node --test tests/flow-generation.test.ts",
+    "test:class-errors": "npm run build && node --test tests/class-scan-errors.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -6,6 +6,7 @@ import type { ClassDetails, ClassMember as ClassMemberT, CompositeTypeT, FieldTy
 import { JsonMap } from '@codaigram/shared/json-map';
 import type { ScannedClassT as ClassDetailsT, ScannedUnknownRelationT as RelationT, StoredScannedClassT as StoredClassT } from '@codaigram/shared/model/class';
 import type { PromptHistoryEntryT, ScannedTestCaseT as TestCaseT, TestScanResultT as ScanResultT } from '@codaigram/shared/model/test';
+import { findSourceFiles } from '@codaigram/scan-shared';
 import { formatFailure, initializeLog, log, logAndThrow, loggedFetch } from './scanner_utils.js';
 
 enum FileType {
@@ -57,22 +58,7 @@ function isInsideDirectory(candidate: string, parent: string): boolean {
   return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-function findFiles(rootPath: string): readonly string[] {
-  const pendingDirectories: string[] = [rootPath];
-  const files: string[] = [];
-  while (pendingDirectories.length > 0) {
-    const directory: string | undefined = pendingDirectories.pop();
-    if (!directory) continue;
-    const entries: readonly fs.Dirent[] = fs.readdirSync(directory, { withFileTypes: true }).sort((left: fs.Dirent, right: fs.Dirent) => left.name.localeCompare(right.name));
-    for (let index: number = 0; index < entries.length; index += 1) {
-      const entry: fs.Dirent = entries[index]!;
-      const entryPath: string = path.join(directory, entry.name);
-      if (entry.isDirectory() && !IGNORED_DIRECTORY_NAMES.has(entry.name)) pendingDirectories.push(entryPath);
-      if (entry.isFile()) files.push(entryPath);
-    }
-  }
-  return files.sort((left: string, right: string) => left.localeCompare(right));
-}
+const findFiles = findSourceFiles;
 
 function nameWithoutSuffix(filePath: string, suffixPattern: RegExp): string {
   const fileName: string = path.basename(filePath);
@@ -96,8 +82,8 @@ function propertyInitializer(objectLiteral: ts.ObjectLiteralExpression, name: st
   for (let index: number = 0; index < objectLiteral.properties.length; index += 1) {
     const property: ts.ObjectLiteralElementLike = objectLiteral.properties.at(index)!;
     if (!ts.isPropertyAssignment(property)) continue;
-    const propertyName: string = property.name.getText();
-    if (propertyName === name || propertyName === `'${name}'` || propertyName === `"${name}"`) return property.initializer;
+    const propertyName: string = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) ? property.name.text : '';
+    if (propertyName === name) return property.initializer;
   }
   // UNTRUST-ALLOW-NULLISH: TypeScript represents a missing object member as undefined; this boundary returns the absence to the caller, which validates the required metadata.
   return undefined;
@@ -142,6 +128,139 @@ function readCaseMetadata(casePath: string): TestCaseT {
   return logAndThrow(new Error(`Test case ${casePath} must export TEST_CASE_METADATA.`));
 }
 
+type TestFlowCallT = {
+  readonly call: string;
+  readonly subcalls?: readonly TestFlowCallT[];
+  readonly recursiveCall?: readonly string[];
+};
+
+type TestFlowT = {
+  readonly testname: string;
+  readonly calls: readonly TestFlowCallT[];
+};
+
+type TestFunctionT = {
+  readonly key: ts.Node;
+  readonly declaration: ts.FunctionLikeDeclaration;
+};
+
+type ActiveTestFunctionT = {
+  readonly key: ts.Node;
+  readonly route: readonly string[];
+};
+
+function testTitle(sourceFile: ts.SourceFile, fallback: string): string {
+  for (let statementIndex: number = 0; statementIndex < sourceFile.statements.length; statementIndex += 1) {
+    const statement: ts.Statement = sourceFile.statements.at(statementIndex)!;
+    if (!ts.isVariableStatement(statement)) continue;
+    for (let declarationIndex: number = 0; declarationIndex < statement.declarationList.declarations.length; declarationIndex += 1) {
+      const declaration: ts.VariableDeclaration = statement.declarationList.declarations.at(declarationIndex)!;
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== 'TEST_CASE_METADATA' || !declaration.initializer || !ts.isObjectLiteralExpression(declaration.initializer)) continue;
+      const title: ts.Expression | undefined = propertyInitializer(declaration.initializer, 'title');
+      if (title && (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title))) return title.text;
+    }
+  }
+  return fallback;
+}
+
+function callName(expression: ts.Expression): string {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression)) {
+    if (ts.isIdentifier(expression.expression)) return `${expression.expression.text}.${expression.name.text}`;
+    return expression.name.text;
+  }
+  if (ts.isElementAccessExpression(expression)) return expression.getText();
+  return expression.getText();
+}
+
+function testFunctionTarget(call: ts.CallExpression, checker: ts.TypeChecker): TestFunctionT | undefined {
+  let symbolLocation: ts.Node = call.expression;
+  if (ts.isPropertyAccessExpression(symbolLocation)) symbolLocation = symbolLocation.name;
+  if (!ts.isIdentifier(symbolLocation)) return undefined;
+  let symbol: ts.Symbol | undefined = checker.getSymbolAtLocation(symbolLocation);
+  if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+  const declarations: readonly ts.Declaration[] = symbol?.declarations ?? [];
+  for (let declarationIndex: number = 0; declarationIndex < declarations.length; declarationIndex += 1) {
+    const declaration: ts.Declaration = declarations[declarationIndex]!;
+    if (ts.isFunctionDeclaration(declaration) || ts.isMethodDeclaration(declaration) || ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration)) {
+      return { key: declaration, declaration };
+    }
+    if (ts.isVariableDeclaration(declaration) && declaration.initializer && (ts.isFunctionExpression(declaration.initializer) || ts.isArrowFunction(declaration.initializer))) {
+      return { key: declaration, declaration: declaration.initializer };
+    }
+  }
+  return undefined;
+}
+
+function testFlowCalls(node: ts.Node, checker: ts.TypeChecker, activeFunctions: readonly ActiveTestFunctionT[], route: readonly string[]): TestFlowCallT[] {
+  if (ts.isCallExpression(node)) return [buildTestFlowCall(node, checker, activeFunctions, route)];
+  const calls: TestFlowCallT[] = [];
+  function visit(current: ts.Node): void {
+    if (ts.isFunctionLike(current) && current !== node) return;
+    if (ts.isCallExpression(current)) {
+      calls.push(buildTestFlowCall(current, checker, activeFunctions, route));
+      return;
+    }
+    current.forEachChild(visit);
+  }
+  node.forEachChild(visit);
+  return calls;
+}
+
+function buildTestFlowCall(callExpression: ts.CallExpression, checker: ts.TypeChecker, activeFunctions: readonly ActiveTestFunctionT[], parentRoute: readonly string[]): TestFlowCallT {
+  const name: string = callName(callExpression.expression);
+  const callRoute: readonly string[] = [...parentRoute, name];
+  const target: TestFunctionT | undefined = testFunctionTarget(callExpression, checker);
+  const activeTarget: ActiveTestFunctionT | undefined = target ? activeFunctions.find((item: ActiveTestFunctionT) => item.key === target.key) : undefined;
+  if (activeTarget) return { call: name, recursiveCall: activeTarget.route };
+
+  const nextActive: readonly ActiveTestFunctionT[] = target
+    ? [...activeFunctions, { key: target.key, route: callRoute }]
+    : activeFunctions;
+  const nestedCalls: TestFlowCallT[] = [];
+  if (ts.isPropertyAccessExpression(callExpression.expression) && ts.isCallExpression(callExpression.expression.expression)) {
+    nestedCalls.push(buildTestFlowCall(callExpression.expression.expression, checker, activeFunctions, callRoute));
+  } else if (ts.isCallExpression(callExpression.expression)) {
+    nestedCalls.push(buildTestFlowCall(callExpression.expression, checker, activeFunctions, callRoute));
+  }
+  callExpression.arguments.forEach((argument: ts.Expression) => {
+    if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) nestedCalls.push(...testFlowCalls(argument, checker, nextActive, callRoute));
+    else nestedCalls.push(...testFlowCalls(argument, checker, activeFunctions, callRoute));
+  });
+  if (target && target.declaration.body) nestedCalls.push(...testFlowCalls(target.declaration.body, checker, nextActive, callRoute));
+  if (nestedCalls.length === 0) return { call: name };
+  return { call: name, subcalls: nestedCalls };
+}
+
+function testFlowForCase(casePath: string, title: string, program: ts.Program): TestFlowT {
+  const sourceFile: ts.SourceFile | undefined = program.getSourceFile(casePath);
+  if (!sourceFile) return logAndThrow(new Error(`Unable to load scanner test source ${casePath}.`));
+  const checker: ts.TypeChecker = program.getTypeChecker();
+  const calls: TestFlowCallT[] = [];
+  let foundTest: boolean = false;
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node)) {
+      const calledName: string = callName(node.expression);
+      const callback: ts.Expression | undefined = node.arguments.at(1);
+      if ((calledName === 'test' || calledName === 'it' || calledName.endsWith('.test') || calledName.endsWith('.it')) && callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+        foundTest = true;
+        calls.push(...testFlowCalls(callback, checker, [], []));
+        return;
+      }
+    }
+    node.forEachChild(visit);
+  }
+  visit(sourceFile);
+  if (!foundTest) return logAndThrow(new Error(`Scanner test case ${casePath} does not contain a test/it callback for flow generation.`));
+  return { testname: title, calls };
+}
+
+function writeTestFlow(casePath: string, flow: TestFlowT): void {
+  const flowPath: string = casePath.replace(SOURCE_FILE_PATTERN, '.flow.json');
+  fs.writeFileSync(flowPath, `${JSON.stringify(flow, null, 2)}\n`, 'utf8');
+  log('INFO', `TEST FLOW ${path.relative(process.cwd(), flowPath)}`);
+}
+
 function scanTests(rootPath: string): ScanResultT {
   const files: readonly string[] = findFiles(rootPath);
   const groupFiles: readonly string[] = files.filter((filePath: string) => GROUP_FILE_PATTERN.test(filePath));
@@ -156,11 +275,24 @@ function scanTests(rootPath: string): ScanResultT {
     log('INFO', `TEST GROUP ${groupName}`);
   }
   const cases: TestCaseT[] = [];
+  const program: ts.Program = ts.createProgram({
+    rootNames: files,
+    options: {
+      allowJs: true,
+      checkJs: false,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      target: ts.ScriptTarget.ESNext
+    }
+  });
   for (let index: number = 0; index < caseFiles.length; index += 1) {
     const caseFile: string = caseFiles[index]!;
     const groupName: string = findNearestGroupName(caseFile, rootPath, groupNamesByDirectory);
     const caseName: string = nameWithoutSuffix(caseFile, CASE_FILE_PATTERN);
     const metadata: TestCaseT = readCaseMetadata(caseFile);
+    const flowSourceFile: ts.SourceFile | undefined = program.getSourceFile(caseFile);
+    if (!flowSourceFile) logAndThrow(new Error(`Unable to load scanner test source ${caseFile}.`));
+    writeTestFlow(caseFile, testFlowForCase(caseFile, testTitle(flowSourceFile, caseName), program));
     cases.push({
       group: groupName,
       name: caseName,
@@ -320,6 +452,7 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
   const discovered: readonly string[] = rootPaths.flatMap(findFiles);
   const knownFiles: ReadonlySet<string> = new Set(discovered);
   const files: readonly string[] = discovered.filter((filePath: string) => isClassSource(filePath, knownFiles));
+  console.log(`Preparing class scan from ${files.length} source files.`);
   const program: ts.Program = ts.createProgram(files, {
     allowJs: true,
     noEmit: true,
@@ -327,6 +460,7 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
   });
+  console.log('TypeScript program ready; checking declarations and exception usage.');
   const checker: ts.TypeChecker = program.getTypeChecker();
   const exceptionDeclarations: Set<ts.Declaration> = new Set<ts.Declaration>();
   function extendsError(type: ts.Type, visited: Set<ts.Type>): boolean {
@@ -377,6 +511,9 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
     if (uniqueNames.has(detail.name)) logAndThrow(new Error(`Class scan found duplicate declaration ${detail.name}.`));
     uniqueNames.add(detail.name);
   });
+  if (details.length === 0) {
+    logAndThrow(new Error(`Class scan found no class or interface declarations in the scanned source files under: ${rootPaths.join(', ')}. Verify the scan folders and source filters.`));
+  }
   return details.sort((left: ClassDetailsT, right: ClassDetailsT) => left.name.localeCompare(right.name));
 }
 

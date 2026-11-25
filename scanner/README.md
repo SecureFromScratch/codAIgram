@@ -21,8 +21,12 @@ case identities across different folders cause an error before uploading.
 
 `test` recursively finds
 `*.test.*` test-group files and `*.case.*` test-case files. A case belongs to
-the nearest ancestor directory containing a group file. Output is sorted and
-uses these records:
+the nearest ancestor directory containing a group file. For each case file,
+the scanner also writes or refreshes a pretty-printed `<testfile>.flow.json`
+beside it. The flow follows statically resolvable function calls from the test
+callback. When a call reaches a function already on the current path, the flow
+stores a `recursiveCall` path to that node instead of expanding it again.
+Output is sorted and uses these records:
 
 ```text
 TEST GROUP <group-name>
