@@ -1,6 +1,6 @@
 # CodAIgram Bridge Protocol
 
-This sibling package contains the host-independent CodAIgram Bridge protocol logic shared by the VS Code extension, the browser client, and mock hosts. It includes request validation, workspace synchronization, pending editor-wait state, and a `BridgeClient` API for retrieving workspace folders and sending AI prompts. `BridgeClient` accepts a socket factory so each host can supply its own WebSocket implementation. This package does not import `vscode`.
+This sibling package contains the host-independent CodAIgram Bridge protocol logic shared by the VS Code extension, the browser client, and mock hosts. It includes request validation, workspace synchronization, pending editor-wait state, and a `BridgeClient` API for retrieving workspace folders, scanning projects, retrieving type source with `getCode(projectName, workFolders, filepath, typeName)`, and sending AI prompts. `BridgeClient` accepts a socket factory so each host can supply its own WebSocket implementation. This package does not import `vscode`.
 
 Build it with:
 

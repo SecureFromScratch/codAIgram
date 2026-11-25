@@ -13,20 +13,54 @@ export interface WorkspaceFolder {
     readonly name: string;
     readonly uri: string;
     readonly index: number;
+    readonly configuredAgents: readonly string[];
 }
+
+export interface PromptOptions {
+    readonly cwd: string;
+    readonly workFolders: readonly string[];
+}
+
+export interface ScanTestCase {
+    readonly group: string;
+    readonly name: string;
+    readonly description: string;
+    readonly prompt: string;
+    readonly prompts: readonly { readonly when: string; readonly text: string }[];
+}
+
+export interface ScanTestsResult {
+    readonly groups: readonly string[];
+    readonly cases: readonly ScanTestCase[];
+}
+
+export interface ScanClassResult {
+    readonly declaration: "CLASS" | "INTERFACE";
+    readonly name: string;
+    readonly sourceFile: string;
+    readonly modifiedAt: string;
+    readonly methods: readonly unknown[];
+    readonly relations: readonly unknown[];
+}
+
+export type GetCodeResult = string | readonly string[];
 
 interface BridgeMessage {
     readonly version?: unknown;
     readonly type?: unknown;
     readonly id?: unknown;
     readonly code?: unknown;
+    readonly cause?: unknown;
     readonly sessionId?: unknown;
     readonly syncTimestamp?: unknown;
     readonly folders?: unknown;
     readonly response?: unknown;
+    readonly result?: unknown;
 }
 
-interface PendingRequest {
+interface PendingBridgeClientRequest {
+    readonly operation: "workspace_folders" | "chat/ask" | "scan" | "code/get";
+    readonly startedAt: number;
     readonly resolve: (message: BridgeMessage) => void;
     readonly reject: (error: Error) => void;
     readonly timeout: ReturnType<typeof setTimeout>;
@@ -38,7 +72,7 @@ export class BridgeClient {
     private readonly socketFactory: BridgeSocketFactory;
     private readonly connectionOrigin: string;
     private readonly connectionHost: string;
-    private readonly pending: Map<string, PendingRequest> = new Map<string, PendingRequest>();
+    private readonly pending: Map<string, PendingBridgeClientRequest> = new Map<string, PendingBridgeClientRequest>();
     private readonly disconnectListeners: Set<() => void> = new Set<() => void>();
     private disconnected: boolean = false;
     private nextId: number = 1;
@@ -46,7 +80,7 @@ export class BridgeClient {
     private sessionIdValue: string | undefined;
     private sessionReady: Promise<string>;
     private resolveSession: ((sessionId: string) => void) | undefined;
-    public constructor(connectionUrl: string, origin: string = "https://codai.example", socketFactory: BridgeSocketFactory = browserSocketFactory, private readonly timeoutMs: number = 10_000) {
+    public constructor(connectionUrl: string, origin: string = "https://codai.example", socketFactory: BridgeSocketFactory = browserSocketFactory, private readonly timeoutMs: number = 10_000, sessionId?: string) {
         // UNTRUST-ALLOW-UNLOGGED-THROW: URL parsing rejects invalid caller input before any network operation starts.
         const parsed: URL = new URL(connectionUrl);
         if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
@@ -57,7 +91,8 @@ export class BridgeClient {
         this.connectionOrigin = origin;
         this.connectionHost = `${parsed.protocol}//${parsed.host}`;
         this.sessionReady = this.createSessionPromise();
-        this.ready = this.open(connectionUrl);
+        const initialUrl: string = sessionId === undefined ? connectionUrl : this.sessionUrl(sessionId);
+        this.ready = this.open(initialUrl);
     }
 
     public onDisconnect(listener: () => void): () => void {
@@ -73,7 +108,7 @@ export class BridgeClient {
 
     public async getFolders(): Promise<readonly WorkspaceFolder[]> {
         await this.ready;
-        const response: BridgeMessage = await this.request("workspace_folders");
+        const response: BridgeMessage = await this.requestWorkspaceFolders();
         if (response.type !== "workspace_folders" || !Array.isArray(response.folders) || typeof response.syncTimestamp !== "number") {
             // UNTRUST-ALLOW-UNLOGGED-THROW: The malformed response is reported without exposing its payload contents; the caller receives only a stable validation error.
             throw new Error("The bridge returned an invalid workspace folder response.");
@@ -82,28 +117,65 @@ export class BridgeClient {
         return response.folders as readonly WorkspaceFolder[];
     }
 
-    public async promptAi(prompt: string): Promise<string> {
+    public async promptAi(prompt: string, options: PromptOptions): Promise<string> {
+        if (!options || typeof options.cwd !== "string" || options.cwd.length === 0) {
+            // UNTRUST-ALLOW-UNLOGGED-THROW: Empty cwd is invalid local caller input and is rejected before any bridge request is sent.
+            throw new Error("cwd must not be empty.");
+        }
+        if (!Array.isArray(options.workFolders) || options.workFolders.some((folder: unknown) => typeof folder !== "string" || folder.length === 0)) {
+            // UNTRUST-ALLOW-UNLOGGED-THROW: Empty work-folder paths are invalid local caller input and are rejected before any bridge request is sent.
+            throw new Error("workFolders must be a list of non-empty paths.");
+        }
         await this.ready;
         // UNTRUST-ALLOW-NULLISH: An absent timestamp means no workspace snapshot has been fetched for this connection, so the client must synchronize before sending a chat request.
         if (this.syncTimestamp === undefined) await this.getFolders();
         const syncTimestamp: number = this.currentSyncTimestamp();
         try {
-            const response: BridgeMessage = await this.requestChat(prompt, syncTimestamp);
+            const response: BridgeMessage = await this.requestChat(prompt, syncTimestamp, options);
             if (response.type !== "chat_response" || typeof response.response !== "string") {
                 // UNTRUST-ALLOW-UNLOGGED-THROW: The malformed response is reported to the caller without exposing payload contents; only a stable validation error is returned.
                 throw new Error("The bridge returned an invalid AI response.");
             }
             return response.response;
         } catch (error: unknown) {
-            console.warn("Bridge AI request failed.", error instanceof Error ? "error" : "non-error failure");
             if (error instanceof Error && error.message === "workspace_sync_required") {
                 await this.getFolders();
-                const retry: BridgeMessage = await this.requestChat(prompt, this.currentSyncTimestamp());
-                if (retry.type === "chat_response" && typeof retry.response === "string") return retry.response;
+                try {
+                    const retry: BridgeMessage = await this.requestChat(prompt, this.currentSyncTimestamp(), options);
+                    if (retry.type === "chat_response" && typeof retry.response === "string") return retry.response;
+                } catch (retryError: unknown) {
+                    throw retryError;
+                }
             }
             // UNTRUST-ALLOW-UNLOGGED-THROW: The request error is already represented by its stable protocol code, logged above, and propagated to the API caller without payload details.
             throw error;
         }
+    }
+
+    public async scanForTests(workFolders: readonly string[]): Promise<ScanTestsResult> {
+        await this.ready;
+        const response: BridgeMessage = await this.requestScan("scan/tests", workFolders);
+        if (response.type !== "scan_tests_response" || !isScanTestsResult(response.result)) throw new Error("The bridge returned an invalid test scan response.");
+        return response.result;
+    }
+
+    public async scanForClasses(workFolders: readonly string[]): Promise<readonly ScanClassResult[]> {
+        await this.ready;
+        const response: BridgeMessage = await this.requestScan("scan/classes", workFolders);
+        if (response.type !== "scan_classes_response" || !Array.isArray(response.result)) throw new Error("The bridge returned an invalid class scan response.");
+        return response.result as readonly ScanClassResult[];
+    }
+
+    public async getCode(projectName: string, workFolders: readonly string[], filepath: string, typeName: string): Promise<GetCodeResult> {
+        if (!projectName) throw new Error("projectName must not be empty.");
+        if (workFolders.length === 0 || workFolders.some((folder: string) => folder.length === 0)) throw new Error("workFolders must be a non-empty list of non-empty paths.");
+        if (!filepath) throw new Error("filepath must not be empty.");
+        if (filepath.split(/[\\/]/u).includes("..")) throw new Error("filepath must not contain relative traversal.");
+        if (!typeName) throw new Error("typeName must not be empty.");
+        await this.ready;
+        const response: BridgeMessage = await this.requestCode(projectName, workFolders, filepath, typeName);
+        if (response.type !== "code_response" || (typeof response.code !== "string" && !(Array.isArray(response.code) && response.code.every((item: unknown) => typeof item === "string")))) throw new Error("The bridge returned an invalid code response.");
+        return response.code as GetCodeResult;
     }
 
     public async close(): Promise<void> {
@@ -121,12 +193,21 @@ export class BridgeClient {
         return this.sessionIdValue;
     }
 
+    public async waitForSessionId(): Promise<string> {
+        return this.sessionReady;
+    }
+
     public async reconnect(): Promise<void> {
         const sessionId: string = await this.sessionReady;
         await this.close();
         this.sessionReady = this.createSessionPromise();
         this.disconnected = false;
-        await this.open(`${this.connectionHost}/session/${sessionId}`);
+        await this.open(this.sessionUrl(sessionId));
+        await this.sessionReady;
+    }
+
+    private sessionUrl(sessionId: string): string {
+        return `${this.connectionHost}/session/${encodeURIComponent(sessionId)}`;
     }
 
     private createSessionPromise(): Promise<string> {
@@ -174,33 +255,60 @@ export class BridgeClient {
         return this.syncTimestamp;
     }
 
-    private requestChat(prompt: string, syncTimestamp: number): Promise<BridgeMessage> {
-        return this.request("chat/ask", prompt, syncTimestamp);
-    }
-
-    private request(type: "workspace_folders" | "chat/ask", prompt?: string, syncTimestamp?: number): Promise<BridgeMessage> {
+    private requestChat(prompt: string, syncTimestamp: number, options: PromptOptions): Promise<BridgeMessage> {
         const id: string = `client-${this.nextId++}`;
-        if (type === "workspace_folders") return this.sendRequest(id, JSON.stringify({ version: 1, type, id }));
-        if (typeof prompt !== "string" || typeof syncTimestamp !== "number") {
-            // UNTRUST-ALLOW-UNLOGGED-THROW: The caller invariant failure contains no external payload; the API rejects the malformed local call with a stable error.
-            throw new Error("A chat request requires a prompt and workspace synchronization timestamp.");
-        }
-        return this.sendRequest(id, JSON.stringify({ version: 1, type, id, prompt, syncTimestamp }));
+        const request: string = JSON.stringify({
+            version: 1,
+            type: "chat/ask",
+            id,
+            prompt,
+            syncTimestamp,
+            cwd: options.cwd,
+            workFolders: options.workFolders
+        });
+        return this.sendRequest(id, "chat/ask", request);
     }
 
-    private sendRequest(id: string, text: string): Promise<BridgeMessage> {
+    private requestWorkspaceFolders(): Promise<BridgeMessage> {
+        const id: string = `client-${this.nextId++}`;
+        const request: string = JSON.stringify({ version: 1, type: "workspace_folders", id });
+        return this.sendRequest(id, "workspace_folders", request);
+    }
+
+    private requestScan(type: "scan/tests" | "scan/classes", workFolders: readonly string[]): Promise<BridgeMessage> {
+        const id: string = `client-${this.nextId++}`;
+        const request: string = JSON.stringify({ version: 1, type, id, workFolders });
+        return this.sendRequest(id, "scan", request);
+    }
+
+    private requestCode(projectName: string, workFolders: readonly string[], filepath: string, typeName: string): Promise<BridgeMessage> {
+        const id: string = `client-${this.nextId++}`;
+        const request: string = JSON.stringify({ version: 1, type: "code/get", id, projectName, workFolders, filepath, typeName });
+        return this.sendRequest(id, "code/get", request);
+    }
+
+    private sendRequest(id: string, operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", text: string): Promise<BridgeMessage> {
         return new Promise<BridgeMessage>((resolve, reject) => {
+            const startedAt: number = Date.now();
             const timeout: ReturnType<typeof setTimeout> = setTimeout(() => {
-                const pending: PendingRequest | undefined = this.pending.get(id);
+                const pending: PendingBridgeClientRequest | undefined = this.pending.get(id);
                 if (!pending) return;
                 this.pending.delete(id);
+                this.logRequestFailure(operation, id, "bridge_response_timeout", Date.now() - startedAt);
                 pending.reject(new Error("The bridge request timed out."));
             }, this.timeoutMs);
-            this.pending.set(id, { resolve, reject, timeout });
+            this.pending.set(id, { operation, startedAt, resolve, reject, timeout });
+            console.info(`[${new Date().toISOString()}] Sending request to VS Code bridge.`, {
+                operation,
+                requestId: id,
+                endpoint: this.connectionHost,
+                socketReadyState: this.socket.readyState
+            });
             this.socket.send(text, (error) => {
                 if (error) {
                     clearTimeout(timeout);
                     this.pending.delete(id);
+                    this.logRequestFailure(operation, id, "websocket_send_failed", Date.now() - startedAt);
                     // UNTRUST-ALLOW-UNLOGGED-THROW: WebSocket send errors are returned directly to the pending request caller.
                     reject(error);
                 }
@@ -228,13 +336,22 @@ export class BridgeClient {
             return;
         }
         if (typeof message.id !== "string") return;
-        const pending: PendingRequest | undefined = this.pending.get(message.id);
+        const pending: PendingBridgeClientRequest | undefined = this.pending.get(message.id);
         if (!pending) return;
         clearTimeout(pending.timeout);
         this.pending.delete(message.id);
         if (message.type === "error") {
-            pending.reject(new Error(typeof message.code === "string" ? message.code : "bridge_request_failed"));
+            const errorCode: string = typeof message.code === "string" ? message.code : "bridge_request_failed";
+            const errorCause: string = typeof message.cause === "string" ? message.cause : "not provided";
+            this.logRequestFailure(pending.operation, message.id, `${errorCode}; cause=${errorCause}`, Date.now() - pending.startedAt);
+            pending.reject(new Error(errorCause === "not provided" ? errorCode : `${errorCode} (${errorCause})`));
         } else {
+            console.info(`[${new Date().toISOString()}] VS Code bridge response received.`, {
+                operation: pending.operation,
+                requestId: message.id,
+                endpoint: this.connectionHost,
+                durationMs: Date.now() - pending.startedAt
+            });
             pending.resolve(message);
         }
     }
@@ -254,8 +371,31 @@ export class BridgeClient {
         });
         this.pending.clear();
     }
+
+    private logRequestFailure(operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", requestId: string, errorCode: string, durationMs: number): void {
+        console.error(`[${new Date().toISOString()}] VS Code bridge request failed.`, {
+            operation,
+            requestId,
+            endpoint: this.connectionHost,
+            errorCode,
+            durationMs,
+            socketReadyState: this.socket.readyState
+        });
+    }
+}
+
+function isScanTestsResult(value: unknown): value is ScanTestsResult {
+    return typeof value === "object" && value !== null && "groups" in value && Array.isArray(value.groups) && "cases" in value && Array.isArray(value.cases);
 }
 
 export function createBridgeClient(connectionUrl: string, origin?: string, socketFactory?: BridgeSocketFactory): BridgeClient {
     return new BridgeClient(connectionUrl, origin, socketFactory);
+}
+
+export function createBridgeClientForSession(connectionUrl: string, sessionId: string, origin?: string, socketFactory?: BridgeSocketFactory): BridgeClient {
+    if (sessionId.length === 0) {
+        // UNTRUST-ALLOW-UNLOGGED-THROW: An empty session identifier is rejected as invalid local caller input before creating a socket or sending any bridge request.
+        throw new Error("A persistent bridge session requires a session ID.");
+    }
+    return new BridgeClient(connectionUrl, origin, socketFactory, 10_000, sessionId);
 }
