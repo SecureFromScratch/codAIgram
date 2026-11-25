@@ -5,7 +5,12 @@
   ],
   "workspaceLastModified": 1730000000000,
   "promptResponses": [
-    { "prompt": "What is here?", "response": "A test project." }
+    {
+      "prompt": "What is here?",
+      "response": "A test project.",
+      "expectedCwd": "/project",
+      "expectedWorkFolders": []
+    }
   ],
   "trustedOrigins": ["https://codai.example"]
 }

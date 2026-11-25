@@ -1,11 +1,15 @@
 import * as http from "node:http";
-import { PendingEditorWaits, scheduleEditorWaitTimeout, validateWorkspaceRequest } from "@codaigram/bridge-protocol";
+import { randomBytes } from "node:crypto";
+import { isChatPromptRequest, PendingEditorWaits, scheduleEditorWaitTimeout, validateWorkspaceRequest } from "@codaigram/bridge-protocol";
 import type { MockConfig } from "./config";
 import { WebSocket, WebSocketServer } from "ws";
 import type { RawData } from "ws";
 
 const HOST: string = "127.0.0.1";
 const DEFAULT_ORIGINS: readonly string[] = ["https://codai.example"];
+const sessionIdByClient: Map<WebSocket, string> = new Map<WebSocket, string>();
+const sessionStates: Map<string, "active" | "available"> = new Map<string, "active" | "available">();
+const sessionClientById: Map<string, WebSocket> = new Map<string, WebSocket>();
 
 export async function startMock(config: MockConfig): Promise<http.Server> {
   const httpServer: http.Server = http.createServer((request, response) => {
@@ -17,6 +21,7 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
     response.writeHead(404);
     response.end("Not Found");
   });
+  let pairingTokenUsed: boolean = false;
   const wsServer: WebSocketServer = new WebSocketServer({ noServer: true, maxPayload: 65_536 });
   httpServer.on("upgrade", (request, socket, head) => {
     const address: ReturnType<http.Server["address"]> = httpServer.address();
@@ -28,18 +33,42 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
     const requestText: string = request.url ?? "/";
     const validUrl: boolean = URL.canParse(requestText, `ws://${HOST}`);
     const requestUrl: URL | undefined = validUrl ? new URL(requestText, `ws://${HOST}`) : undefined;
-    if (!expectedHost || !acceptedOrigin || !requestUrl || requestUrl.pathname !== `/${config.authtoken}`) {
+    const isPairingRoute: boolean = requestUrl?.pathname === `/${config.authtoken}` && !pairingTokenUsed;
+    const suppliedSessionId: string = requestUrl?.pathname.startsWith("/session/") ? requestUrl.pathname.slice("/session/".length) : "";
+    const previousSessionClient: WebSocket | undefined = sessionClientById.get(suppliedSessionId);
+    const previousSessionIsClosed: boolean = previousSessionClient !== undefined && previousSessionClient.readyState !== WebSocket.OPEN;
+    const isSessionRoute: boolean = suppliedSessionId.length > 0 && (sessionStates.get(suppliedSessionId) === "available" || previousSessionIsClosed);
+    if (!expectedHost || !acceptedOrigin || !requestUrl || (!isPairingRoute && !isSessionRoute)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       socket.destroy();
       return;
     }
-    wsServer.handleUpgrade(request, socket, head, (client) => wsServer.emit("connection", client));
+    const sessionId: string = isSessionRoute ? suppliedSessionId : randomBytes(32).toString("base64url");
+    sessionStates.set(sessionId, "active");
+    if (previousSessionIsClosed) sessionClientById.delete(sessionId);
+    let upgradeCompleted: boolean = false;
+    socket.once("close", () => {
+      if (!upgradeCompleted) sessionStates.set(sessionId, "available");
+    });
+    wsServer.handleUpgrade(request, socket, head, (client) => {
+      upgradeCompleted = true;
+      if (isPairingRoute) pairingTokenUsed = true;
+      sessionIdByClient.set(client, sessionId);
+      sessionClientById.set(sessionId, client);
+      wsServer.emit("connection", client);
+    });
   });
   wsServer.on("connection", (client: WebSocket) => {
     const waits: PendingEditorWaits = new PendingEditorWaits((id: string) => {
       if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ version: 1, type: "error", id, code: "request_timeout" }));
     }, scheduleEditorWaitTimeout);
-    client.once("close", () => waits.clear());
+    const sessionId: string | undefined = sessionIdByClient.get(client);
+    client.once("close", () => {
+      waits.clear();
+      if (sessionId) sessionStates.set(sessionId, "available");
+      if (sessionId && sessionClientById.get(sessionId) === client) sessionClientById.delete(sessionId);
+      sessionIdByClient.delete(client);
+    });
     let queue: Promise<void> = Promise.resolve();
     client.on("message", (data: RawData, binary: boolean) => {
       if (binary) return;
@@ -54,12 +83,25 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
           client.send(JSON.stringify({ version: 1, type: "pong", id: request.id }));
         } else if (request.type === "workspace_folders") {
           client.send(JSON.stringify({ version: 1, type: "workspace_folders", id: request.id, syncTimestamp: config.workspaceLastModified, folders: config.workspaceFolders }));
-        } else if ((request.type === "chat" || request.type === "chat/ask") && request.syncTimestamp !== config.workspaceLastModified) {
+        } else if (request.type === "code/get" && typeof request.projectName === 'string' && Array.isArray(request.workFolders) && typeof request.filepath === 'string' && typeof request.typeName === 'string') {
+          const match = config.codeResponses.find((item) => item.projectName === request.projectName && item.filepath === request.filepath && item.typeName === request.typeName);
+          if (!match || JSON.stringify(match.expectedWorkFolders) !== JSON.stringify(request.workFolders)) {
+            client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "code_not_found" }));
+          } else {
+            client.send(JSON.stringify({ version: 1, type: "code_response", id: request.id, projectName: request.projectName, code: match.code }));
+          }
+        } else if (isChatPromptRequest(request) && request.syncTimestamp !== config.workspaceLastModified) {
           client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "workspace_sync_required", syncTimestamp: config.workspaceLastModified, required: ["workspace_folders"] }));
-        } else if ((request.type === "chat" || request.type === "chat/ask") && typeof request.prompt === "string") {
+        } else if (isChatPromptRequest(request)) {
           const match = config.promptResponses.find((pair) => pair.prompt === request.prompt);
           if (match) {
-            client.send(JSON.stringify({ version: 1, type: "chat_response", id: request.id, response: match.response }));
+            const validOptions: boolean = match.expectedCwd === request.cwd &&
+              JSON.stringify(match.expectedWorkFolders) === JSON.stringify(request.workFolders);
+            if (!validOptions) {
+              client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "prompt_options_mismatch" }));
+            } else {
+              client.send(JSON.stringify({ version: 1, type: "chat_response", id: request.id, response: match.response }));
+            }
           } else {
             client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "prompt_not_found", status: 500 }));
           }
@@ -79,6 +121,7 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
       }).then(() => undefined, () => undefined);
     });
     client.send(JSON.stringify({ version: 1, type: "welcome" }));
+    if (sessionId) client.send(JSON.stringify({ version: 1, type: "session", sessionId }));
   });
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
