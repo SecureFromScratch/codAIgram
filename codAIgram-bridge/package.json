@@ -2,8 +2,11 @@
   "name": "codaigram-bridge",
   "displayName": "CodAIgram Bridge",
   "description": "A local WebSocket bridge for CodAIgram.",
-  "version": "0.4.0",
+  "version": "0.13.0",
   "publisher": "codaigram",
+  "vsce": {
+    "dependencies": false
+  },
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -48,10 +51,15 @@
   },
   "scripts": {
     "check:gates": "untrust-buildgates --project tsconfig.json --config buildgates.json",
-    "compile": "npm run compile:protocol && npm run check:gates && npm run compile:typescript",
+    "check:vv-alignment": "node scripts/check-vv-alignment.cjs",
+    "bootstrap:local-vv": "node scripts/bootstrap-local-vv.cjs",
+    "compile": "npm run check:vv-alignment && npm run compile:protocol && npm run check:gates && npm run compile:typescript",
     "compile:protocol": "npm --prefix ../bridge-protocol run compile",
     "compile:typescript": "tsc -p . && npm run bundle:extension && npm run bundle:validator",
-    "bundle:extension": "esbuild ./test-dist/src/extension.js --bundle --platform=node --external:vscode --outfile=dist/extension.js",
+    "bundle:extension": "esbuild ./test-dist/src/extension.js --bundle --platform=node --external:vscode --alias:@untrust/vv=./node_modules/@untrust/vv/dist/index.js --metafile=dist/extension.meta.json --outfile=dist/extension.js",
+    "vscode:prepublish": "npm run compile && node scripts/bump-minor-version.cjs",
+    "version": "node scripts/ensure-vsix-version.cjs",
+    "package:vsix": "vsce package",
     "watch": "npm run check:gates && npm run bundle:validator && tsc -watch -p .",
     "test:integration": "node ./test-dist/tests/runTest.js",
     "test": "npm run compile && npm run test:integration",
@@ -71,10 +79,13 @@
   },
   "dependencies": {
     "@codaigram/bridge-protocol": "file:../bridge-protocol",
+    "@codaigram/scan-shared": "file:../scan_shared",
     "@untrust/mandate-core": "file:../../mandate/packages/core",
     "@untrust/vv": "file:../../vv_ts/packages/vv",
+    "codaigram": "file:..",
     "esbuild": "^0.25.12",
     "neverthrow": "^8.2.0",
+    "vite-plus": "^1.7.0",
     "ws": "^8.23.0"
   }
 }

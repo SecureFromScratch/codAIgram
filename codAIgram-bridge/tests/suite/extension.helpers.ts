@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
 import * as vscode from "vscode";
 import NodeWebSocket from "ws";
+import type { WorkspaceFolderInfo } from "@codaigram/bridge-protocol";
 
 export const websocketTimeoutMs: number = 2_000;
 export const fixedPort: number = 11100;
@@ -25,6 +26,7 @@ export interface ConnectedWebSocket {
 export interface BridgeApi {
     readonly port: number;
     readonly token: string;
+    readonly getWorkspaceFolders: () => readonly WorkspaceFolderInfo[];
 }
 
 export function request(port: number, method: string): Promise<HttpResult> {

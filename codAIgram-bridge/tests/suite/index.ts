@@ -17,6 +17,7 @@ export function run(): Promise<void> {
     mocha.addFile(path.resolve(__dirname, "codexStop.test.js"));
     mocha.addFile(path.resolve(__dirname, "codexInitialize.test.js"));
     mocha.addFile(path.resolve(__dirname, "codexLifecycle.test.js"));
+    mocha.addFile(path.resolve(__dirname, "codexRuntimeConfiguration.test.js"));
     mocha.addFile(path.resolve(__dirname, "codexThreads.test.js"));
     mocha.addFile(path.resolve(__dirname, "codexThreadStorage.test.js"));
     mocha.addFile(path.resolve(__dirname, "codexHealth.test.js"));

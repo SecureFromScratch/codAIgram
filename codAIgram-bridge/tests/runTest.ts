@@ -28,6 +28,11 @@ type ExtensionTestsEnvT = {
   CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_OPENED: string;
   CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_CLOSED: string;
   CODAIGRAM_BRIDGE_NODE_EXECUTABLE: string;
+  CODAIGRAM_BRIDGE_TEMP_DIRECTORY: string;
+  TEMP: string;
+  TMP: string;
+  TMPDIR: string;
+  NODE_PATH: string;
 };
 
 const shutdownClientScript: string = `
@@ -39,9 +44,11 @@ const socket = new WebSocket("ws://127.0.0.1:" + port + "/" + token, {
 });
 socket.on("message", (message) => {
     const welcome = JSON.parse(message.toString());
+    // Tell the Extension Development Host setup that authentication completed and this external client is now held open.
     if (welcome.version === 1 && welcome.type === "welcome" && Object.keys(welcome).length === 2) fs.writeFileSync(openedFile, "welcome");
 });
 socket.on("close", (code, reason) => {
+    // The outer runner reads this after VS Code exits to verify shutdown closed the active socket abnormally.
     fs.writeFileSync(closedFile, JSON.stringify({ code, reason: reason.toString() }));
     process.exit(0);
 });
@@ -98,8 +105,12 @@ async function startHttpsFixture(): Promise<{ server: https.Server; url: string;
     try {
         execFileSync("certutil.exe", ["-user", "-store", "Root", caThumbprint], { stdio: "ignore" });
     } catch (error: unknown) {
-        console.warn("Test CA was not found in the user trust store; attempting installation.", error instanceof Error ? "error" : "non-error failure");
-        execFileSync("certutil.exe", ["-user", "-addstore", "Root", caCertificatePath], { stdio: "ignore" });
+        try {
+            execFileSync("certutil.exe", ["-store", "Root", caThumbprint], { stdio: "ignore" });
+        } catch (machineStoreError: unknown) {
+            console.warn("Test CA was not found in the current-user or machine trust store; attempting current-user installation.", machineStoreError instanceof Error ? "error" : "non-error failure");
+            execFileSync("certutil.exe", ["-user", "-addstore", "Root", caCertificatePath], { stdio: "ignore" });
+        }
     }
 
     const certificate: selfsigned.GenerateResult = await selfsigned.generate(
@@ -206,7 +217,8 @@ async function assertPortIsClosed(portToCheck: number): Promise<void> {
 async function runScenario(scenario: string): Promise<void> {
     const extensionDevelopmentPath: string = path.resolve(__dirname, "../..");
     const extensionTestsPath: string = path.resolve(__dirname, "suite/index.js");
-    const temporaryRoot: string = await fs.mkdtemp(path.join(projectRoot, "codaigram-bridge-vscode-"));
+    const tsRoot: string = path.resolve(projectRoot, "../..");
+    const temporaryRoot: string = await fs.mkdtemp(path.join(tsRoot, "codaigram-bridge-vscode-"));
     const userDataDir: string = path.join(temporaryRoot, "user-data");
     const extensionsDir: string = path.join(temporaryRoot, "extensions");
     const portFile: string = path.join(temporaryRoot, "allocated-port.txt");
@@ -233,7 +245,12 @@ async function runScenario(scenario: string): Promise<void> {
           CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_PATH: shutdownClientPath,
           CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_OPENED: openedFile,
           CODAIGRAM_BRIDGE_SHUTDOWN_CLIENT_CLOSED: closedFile,
-          CODAIGRAM_BRIDGE_NODE_EXECUTABLE: process.execPath
+          CODAIGRAM_BRIDGE_NODE_EXECUTABLE: process.execPath,
+          CODAIGRAM_BRIDGE_TEMP_DIRECTORY: temporaryRoot,
+          TEMP: temporaryRoot,
+          TMP: temporaryRoot,
+          TMPDIR: temporaryRoot,
+          NODE_PATH: path.join(projectRoot, "node_modules")
         };
         if (httpsFixture.isOk()) {
             extensionTestsEnv.CODAIGRAM_BRIDGE_HTTPS_URL = httpsFixture.value.url;
@@ -246,6 +263,7 @@ async function runScenario(scenario: string): Promise<void> {
                 `--extensions-dir=${extensionsDir}`
             ];
             if (scenario === "shutdown") {
+                // Open a disposable single-folder VS Code workspace. Workspace-root tests need one open folder, and this keeps them isolated from a real project.
                 const workspaceFolder: string = path.join(temporaryRoot, "workspace");
                 await fs.mkdir(workspaceFolder);
                 launchArgs.push(workspaceFolder);
@@ -265,6 +283,7 @@ async function runScenario(scenario: string): Promise<void> {
             }
         }
         if (scenario === "shutdown") {
+            // The client is detached from the host, so it reports socket closure through a file after the host process has exited.
             await waitForFile(closedFile, 5_000);
             const shutdownResult: { code: number } = JSON.parse(await fs.readFile(closedFile, "utf8")) as { code: number };
             if (shutdownResult.code !== 1006) {
@@ -272,6 +291,7 @@ async function runScenario(scenario: string): Promise<void> {
                 throw new Error(`Expected abrupt WebSocket closure during extension shutdown, received code ${shutdownResult.code}.`);
             }
         }
+        // The extension writes its allocated port during teardown; confirm shutdown released the listener.
         const allocatedPort: number = Number.parseInt(await fs.readFile(portFile, "utf8"), 10);
         await assertPortIsClosed(allocatedPort);
     } finally {
@@ -293,6 +313,14 @@ async function runScenario(scenario: string): Promise<void> {
 async function main(): Promise<void> {
     if (!supportsHttpsFixture(process.platform)) {
         console.warn("*********************************************\n*********************************************\nHTTPS certificate integration test is unsupported on Linux and will be skipped.\n*********************************************\n*********************************************");
+    }
+    const selectedScenario: string | undefined = process.env.CODAIGRAM_BRIDGE_ONLY_SCENARIO;
+    if (selectedScenario !== undefined) {
+        if (selectedScenario !== "auth" && selectedScenario !== "concurrency" && selectedScenario !== "shutdown") {
+            throw new Error(`Unknown CODAIGRAM_BRIDGE_ONLY_SCENARIO: ${selectedScenario}`);
+        }
+        await runScenario(selectedScenario);
+        return;
     }
     await runScenario("auth");
     await runScenario("concurrency");

@@ -93,6 +93,8 @@ Phase 4 completion audit: complete for the approved scope. The extension can dis
 
 The approved Phase 3 subset is complete and integrated with the Phase 4 extension host. The activation API exposes `getWorkspaceFolders()` and `getWorkspaceSyncTimestamp()`. Authenticated WebSocket clients can request `workspace_folders`, receive unsolicited `workspace_changed` notifications when VS Code workspace folders change, and must provide the latest synchronization timestamp on `chat` or `chat/ask` requests. Stale requests receive `workspace_sync_required` with the required refresh operations before any chat execution. Broader IDE navigation and editor/project operations remain deferred.
 
+Prompt requests carry `cwd` and the other selected folders in `workFolders`. The bridge client forwards both fields; the Codex request includes `cwd` plus those additional folders, even when the additional-folder list is empty.
+
 ## Phase 5: Initial source-code interrogation
 
 Step 49 complete: synchronized `chat` and `chat/ask` requests now carry a strict prompt, the extension starts or uses its managed read-only Codex App Server, forwards the prompt over JSONL, streams deltas and tool events, supports turn interruption, retains a thread for multi-turn prompts, and returns a correlated `chat_response`. The sibling bridge mock supports exact configured prompt-response pairs and a 500-style `prompt_not_found` error for unknown prompts. Structured diagram context and extension-side source navigation remain deferred because their schemas and UI actions are not defined in the revised roadmap. See `step_summary_49.md`.

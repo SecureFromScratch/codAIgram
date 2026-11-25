@@ -38,7 +38,14 @@ export function registerWorkspaceSyncIntegrationCase(getApi: () => BridgeApi): v
       assert.strictEqual(folders.id, "folders");
       assert.ok(Number.isSafeInteger(folders.syncTimestamp));
       assert.ok(Array.isArray(folders.folders));
-      connection.socket.send(JSON.stringify({ version: 1, type: "chat", id: "chat" }));
+      connection.socket.send(JSON.stringify({
+        version: 1,
+        type: "chat",
+        id: "chat",
+        prompt: "Inspect the project",
+        cwd: "C:\\workspace",
+        workFolders: []
+      }));
       assert.deepStrictEqual(JSON.parse(await nextMessage(connection)), {
         version: 1,
         type: "error",
@@ -51,7 +58,10 @@ export function registerWorkspaceSyncIntegrationCase(getApi: () => BridgeApi): v
         version: 1,
         type: "chat",
         id: "chat-minimal",
-        syncTimestamp: 0
+        syncTimestamp: 0,
+        prompt: "Inspect the project",
+        cwd: "C:\\workspace",
+        workFolders: []
       };
       connection.socket.send(JSON.stringify(minimalChatRequest));
       assert.deepStrictEqual(JSON.parse(await nextMessage(connection)), {
@@ -61,19 +71,6 @@ export function registerWorkspaceSyncIntegrationCase(getApi: () => BridgeApi): v
         code: "workspace_sync_required",
         syncTimestamp: folders.syncTimestamp,
         required: ["workspace_folders"]
-      });
-      const currentChatRequest: object = {
-        version: 1,
-        type: "chat",
-        id: "chat-current",
-        syncTimestamp: folders.syncTimestamp
-      };
-      connection.socket.send(JSON.stringify(currentChatRequest));
-      assert.deepStrictEqual(JSON.parse(await nextMessage(connection)), {
-        version: 1,
-        type: "error",
-        id: "chat-current",
-        code: "unsupported_request"
       });
     } finally {
       await closeWebSocket(connection.socket);

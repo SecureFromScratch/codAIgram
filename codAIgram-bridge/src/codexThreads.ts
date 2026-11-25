@@ -3,6 +3,7 @@ import { err, ok, Result } from "neverthrow";
 export type CodexThreadErrorT = "request_failed" | "invalid_response" | "missing_mapping";
 export interface CodexThreadParams {
   readonly cwd?: string;
+  readonly workFolders?: readonly string[];
   readonly approvalPolicy?: string;
   readonly sandbox?: string;
   readonly threadId?: string;

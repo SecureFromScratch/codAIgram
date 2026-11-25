@@ -81,19 +81,25 @@ If the target is absent or already completed, only the cancellation request rece
 
 ## Workspace synchronization
 
-The extension activation API exposes `getWorkspaceFolders()` and `getWorkspaceSyncTimestamp()` for extension-host consumers. Authenticated browser clients use the WebSocket protocol below.
+The extension activation API exposes `getWorkspaceFolders()` and `getWorkspaceSyncTimestamp()` for extension-host consumers. Each workspace-folder record includes `configuredAgents`: `codex` when `AGENTS.md` exists, `claude` when `CLAUDE.md` exists, and `grok` when `AGENT.md` exists. Authenticated browser clients use the WebSocket protocol below.
 
-A client requests the current VS Code workspace folders with `{"version":1,"type":"workspace_folders","id":"folders"}`. The response includes a monotonic `syncTimestamp` and each folder's display name, URI, and zero-based index. When VS Code adds, removes, or reorders folders, every authenticated client receives `{"version":1,"type":"workspace_changed","syncTimestamp":...}`.
+A client requests the current VS Code workspace folders with `{"version":1,"type":"workspace_folders","id":"folders"}`. The response includes a monotonic `syncTimestamp` and each folder's display name, URI, zero-based index, and `configuredAgents` list. When VS Code adds, removes, or reorders folders, every authenticated client receives `{"version":1,"type":"workspace_changed","syncTimestamp":...}`.
 
 Clients retain the latest timestamp and include it as `syncTimestamp` on workspace-sensitive requests. A `chat` or `chat/ask` request with a missing or stale timestamp is rejected before execution with `{"version":1,"type":"error","id":"chat","code":"workspace_sync_required","syncTimestamp":...,"required":["workspace_folders"]}`. The client performs each operation named in `required`, updates its timestamp, and retries the original request.
 
+Authenticated clients can request scanner-compatible inventories from the bridge with `{"version":1,"type":"scan/tests","id":"scan-1","workFolders":["C:\\workspace"]}` or `type:"scan/classes"`. The extension traverses the supplied folders through the shared scanner traversal and returns `scan_tests_response` or `scan_classes_response` with a `result` payload.
+
+Clients can retrieve a type definition's source text with `{"version":1,"type":"code/get","id":"code-1","projectName":"mock-project","workFolders":["C:\\workspace"],"filepath":"src/model.ts","typeName":"Widget"}`. The bridge returns `code_response` with the extracted `code`; a single match is a string, while multiple matching files across the supplied folders return an array of snippets in work-folder order. Errors such as `unknown_project` or `type_not_found` identify unavailable projects or declarations. Client-side validation rejects empty project names, empty folder lists, empty file paths, and relative traversal segments.
+
 ## Initial source-code interrogation
 
-A synchronized chat request carries a prompt:
+A synchronized chat request carries a prompt, an explicit `cwd`, and the other selected folders in `workFolders`. The browser omits `cwd` from `workFolders`; the bridge adds it when constructing Codex's complete work-folder list. When no additional folders are selected, Codex receives `[cwd]`:
 
 ```json
-{"version":1,"type":"chat","id":"chat-1","syncTimestamp":1700000000000,"prompt":"What files are in this workspace?"}
+{"version":1,"type":"chat","id":"chat-1","syncTimestamp":1700000000000,"prompt":"What files are in this workspace?","cwd":"C:\\workspace","workFolders":[]}
 ```
+
+When additional folders are selected, `workFolders` contains each selected folder except `cwd`; Codex uses `cwd` as its working directory and `[cwd, ...workFolders]` as its available work folders.
 
 The bridge forwards the prompt to its read-only Codex App Server and returns the completed response:
 

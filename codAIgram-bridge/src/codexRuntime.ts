@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import { err, ok, Result } from "neverthrow";
 import { discoverCodexExecutable } from "./codexDiscovery";
 import type { CodexDiscoveryErrorT } from "./codexDiscovery";
-import { resolveLaunchDirectory } from "./launchDirectory";
+import { resolveLaunchDirectory, resolveLaunchDirectoryFor } from "./launchDirectory";
 import type { LaunchDirectoryErrorT } from "./launchDirectory";
 import { startCodexAppServer } from "./codexLifecycle";
 import type { CodexClientInfo, CodexInitializeErrorT } from "./codexInitialize";
@@ -11,6 +11,8 @@ import { CodexProcessHealth } from "./codexHealth";
 import { stopCodexAppServer } from "./codexStop";
 import { CodexJsonRpcClient } from "./codexRpc";
 import type { CodexNotification } from "./codexRpc";
+import { normalizeCodexWorkspaceConfiguration } from "./codexWorkspace";
+import type { CodexWorkspaceConfiguration } from "./codexWorkspace";
 
 interface DeltaParams {
   readonly threadId: unknown;
@@ -28,7 +30,12 @@ interface CompletedTurn {
   readonly status: unknown;
 }
 
-export type CodexRuntimeErrorT = CodexDiscoveryErrorT | LaunchDirectoryErrorT | CodexInitializeErrorT | "spawn_failed" | "unsupported_launcher" | "invalid_executable_path" | "invalid_working_directory" | "missing_stream" | "already_running" | "not_running" | "request_failed" | "invalid_response" | "turn_timeout";
+export type CodexRuntimeErrorT = CodexDiscoveryErrorT | LaunchDirectoryErrorT | CodexInitializeErrorT | "spawn_failed" | "unsupported_launcher" | "invalid_executable_path" | "invalid_working_directory" | "missing_stream" | "already_running" | "not_running" | "request_failed" | "thread_start_failed" | "thread_start_invalid_response" | "turn_start_failed" | "turn_start_invalid_response" | "turn_failed" | "invalid_response" | "turn_timeout";
+
+export interface CodexPromptOptions {
+  readonly cwd?: string;
+  readonly workFolders?: readonly string[];
+}
 
 export class CodexRuntime {
   private child: ChildProcess | undefined;
@@ -36,11 +43,12 @@ export class CodexRuntime {
   private client: CodexJsonRpcClient | undefined;
   private workingDirectory: string | undefined;
   private threadId: string | undefined;
+  private threadWorkspaceConfiguration: CodexWorkspaceConfiguration | undefined;
   private turnId: string | undefined;
 
-  public async start(clientInfo: CodexClientInfo): Promise<Result<void, CodexRuntimeErrorT>> {
+  public async start(clientInfo: CodexClientInfo, options: CodexPromptOptions = {}): Promise<Result<void, CodexRuntimeErrorT>> {
     if (this.child) return err("already_running");
-    const directory: Awaited<ReturnType<typeof resolveLaunchDirectory>> = await resolveLaunchDirectory();
+    const directory: Awaited<ReturnType<typeof resolveLaunchDirectory>> = typeof options.cwd === "string" ? await resolveLaunchDirectoryFor(options.cwd) : await resolveLaunchDirectory();
     if (directory.isErr()) return err(directory.error);
     const executable: Awaited<ReturnType<typeof discoverCodexExecutable>> = await discoverCodexExecutable();
     if (executable.isErr()) return err(executable.error);
@@ -84,8 +92,10 @@ export class CodexRuntime {
     this.client?.dispose();
     // UNTRUST-ALLOW-NULLISH: Clearing the protocol client after shutdown prevents reuse of streams owned by the terminated child process and ensures a later activation creates a fresh JSONL transport.
     this.client = undefined;
-    // UNTRUST-ALLOW-NULLISH: Thread state is activation-owned and must be cleared after stopping its process so no conversation can accidentally target a terminated child.
+    // UNTRUST-ALLOW-NULLISH: Thread state is activation-owned and must be cleared after stopping its process so no conversation can accidentally target a terminated child or reuse its prior workspace authorization.
     this.threadId = undefined;
+    // UNTRUST-ALLOW-NULLISH: A stopped runtime discards its active thread configuration so the next start cannot reuse folder authorization from the previous process or expose stale selected paths.
+    this.threadWorkspaceConfiguration = undefined;
     // UNTRUST-ALLOW-NULLISH: A stopped process cannot have an active turn, so clearing this identifier prevents cancellation from targeting stale Codex state.
     this.turnId = undefined;
     // UNTRUST-ALLOW-NULLISH: The working directory is only valid while the corresponding child process is running and must not be reused after intentional shutdown.
@@ -100,25 +110,51 @@ export class CodexRuntime {
     return this.start(clientInfo);
   }
 
-  public async ask(prompt: string, onDelta?: (delta: string) => void, onEvent?: (notification: CodexNotification) => void): Promise<Result<string, CodexRuntimeErrorT>> {
+  public async ask(prompt: string, onDelta?: (delta: string) => void, onEvent?: (notification: CodexNotification) => void, options: CodexPromptOptions = {}): Promise<Result<string, CodexRuntimeErrorT>> {
     const client: CodexJsonRpcClient | undefined = this.client;
     const cwd: string | undefined = this.workingDirectory;
     if (!client || !cwd) return err("not_running");
+    const requestedCwd: string = typeof options.cwd === "string" ? options.cwd : cwd;
+    const validatedCwd: Awaited<ReturnType<typeof resolveLaunchDirectoryFor>> = await resolveLaunchDirectoryFor(requestedCwd);
+    if (validatedCwd.isErr()) return err(validatedCwd.error);
+    const requestedWorkFolders: readonly string[] = Array.isArray(options.workFolders) ? options.workFolders : [];
+    const validatedWorkFolders: string[] = [];
+    for (let folderIndex: number = 0; folderIndex < requestedWorkFolders.length; folderIndex++) {
+      const folder: string = requestedWorkFolders[folderIndex] as string;
+      if (folder === validatedCwd.value) continue;
+      const validatedFolder: Awaited<ReturnType<typeof resolveLaunchDirectoryFor>> = await resolveLaunchDirectoryFor(folder);
+      if (validatedFolder.isErr()) return err(validatedFolder.error);
+      validatedWorkFolders.push(validatedFolder.value);
+    }
+    const configuration: CodexWorkspaceConfiguration = normalizeCodexWorkspaceConfiguration(validatedCwd.value, validatedWorkFolders);
+    const workspaceConfigurationChanged: boolean = !workspaceConfigurationsMatch(this.threadWorkspaceConfiguration, configuration);
+    if (workspaceConfigurationChanged) {
+      // UNTRUST-ALLOW-NULLISH: Changing selected folder scope requires a new Codex thread because Codex records cwd and workFolders on thread/start; the replacement request below creates a thread with the newly authorized paths.
+      this.threadId = undefined;
+      // UNTRUST-ALLOW-NULLISH: The saved folder scope belongs to the thread being discarded and must not authorize the replacement thread; its new configuration is saved only after thread/start succeeds.
+      this.threadWorkspaceConfiguration = undefined;
+    }
     if (!this.threadId) {
-      const threadParams: object = { cwd, approvalPolicy: "on-request", sandbox: "read-only" };
+      const threadParams: object = {
+        cwd: configuration.cwd,
+        workFolders: configuration.workFolders,
+        approvalPolicy: "on-request",
+        sandbox: "read-only"
+      };
       const started: Result<unknown, string> = await client.request("thread/start", threadParams);
-      if (started.isErr()) return err("request_failed");
+      if (started.isErr()) return err("thread_start_failed");
       const threadId: string | undefined = extractThreadId(started.value);
-      if (!threadId) return err("invalid_response");
+      if (!threadId) return err("thread_start_invalid_response");
       this.threadId = threadId;
+      this.threadWorkspaceConfiguration = configuration;
     }
     const turn: Result<unknown, string> = await client.request("turn/start", {
       threadId: this.threadId,
       input: [{ type: "text", text: prompt }]
     });
-    if (turn.isErr()) return err("request_failed");
+    if (turn.isErr()) return err("turn_start_failed");
     const turnId: string | undefined = extractTurnId(turn.value);
-    if (!turnId) return err("invalid_response");
+    if (!turnId) return err("turn_start_invalid_response");
     this.turnId = turnId;
     const clearTurn: () => void = () => {
       // UNTRUST-ALLOW-NULLISH: The completed or failed turn is no longer cancellable once its terminal result has been delivered, so clearing it prevents stale interrupt requests.
@@ -135,6 +171,13 @@ export class CodexRuntime {
     const result: Result<unknown, string> = await client.request("turn/interrupt", { threadId, turnId });
     return result.isOk() ? ok(void 0) : err("request_failed");
   }
+}
+
+function workspaceConfigurationsMatch(left: CodexWorkspaceConfiguration | undefined, right: CodexWorkspaceConfiguration): boolean {
+  if (!left) return false;
+  return left.cwd === right.cwd &&
+    left.workFolders.length === right.workFolders.length &&
+    left.workFolders.every((folder: string, index: number) => folder === right.workFolders[index]);
 }
 
 // UNTRUST-ALLOW-NULLISH: A malformed Codex response has no usable thread identifier; returning undefined lets the caller report a typed protocol error.
@@ -186,7 +229,7 @@ function collectTurn(client: CodexJsonRpcClient, threadId: string, turnId: strin
         // UNTRUST-ALLOW-NULLISH: Completion parsing treats an absent turn as a non-matching notification.
         const completedTurn: CompletedTurn = (params.turn ?? {}) as CompletedTurn;
         if (params.threadId === threadId && completedTurn.id === turnId) {
-          finish(completedTurn.status === "completed" ? ok(response) : err("request_failed"));
+          finish(completedTurn.status === "completed" ? ok(response) : err("turn_failed"));
         }
       }
     };

@@ -22,6 +22,16 @@ npm run compile
 
 To rebuild on changes, run `npm run watch`.
 
+## Package a VSIX
+
+Run `npm run package:vsix` to create the installable extension package. Every VSCE
+package operation invokes `vscode:prepublish`, which compiles the extension and
+advances the minor version in `package.json`, `package-lock.json`, and
+`vsix_minor_version.txt` before VSCE creates the artifact. An explicit VSCE version
+argument that conflicts with the resulting version is rejected by the `version`
+lifecycle check. Version advancement is part of packaging, not a separate release
+step.
+
 ## Run in VS Code
 
 Open this folder in VS Code and press **F5**. This starts an Extension

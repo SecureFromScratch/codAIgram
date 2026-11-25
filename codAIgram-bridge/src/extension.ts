@@ -1,18 +1,22 @@
 import type { AddressInfo } from "node:net";
+import { existsSync } from "node:fs";
 import * as net from "node:net";
 import * as http from "node:http";
+import * as path from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as vscode from "vscode";
 import { WebSocket, WebSocketServer } from "ws";
 import { ConnectionStatus } from "./connectionStatus";
 import { startLoopbackListener } from "./listenerStartup";
-import { PendingEditorWaits, scheduleEditorWaitTimeout, validateWorkspaceRequest, WorkspaceSyncState } from "@codaigram/bridge-protocol";
+import { isChatPromptRequest, PendingEditorWaits, scheduleEditorWaitTimeout, validateWorkspaceRequest, WorkspaceSyncState } from "@codaigram/bridge-protocol";
 import type { WorkspaceFolderInfo, WorkspaceSyncRequest } from "@codaigram/bridge-protocol";
 import { err, ok } from "neverthrow";
 import type { Result } from "neverthrow";
 import { CodexRuntime } from "./codexRuntime";
-import type { CodexRuntimeErrorT } from "./codexRuntime";
+import type { CodexPromptOptions, CodexRuntimeErrorT } from "./codexRuntime";
 import type { CodexNotification } from "./codexRpc";
+import { getTypeCodes, scanForClasses, scanForTests } from "@codaigram/scan-shared";
+import type { ScannedClass, TestScanResult } from "@codaigram/scan-shared";
 
 type HttpIncomingMessageT = typeof http.IncomingMessage;
 type HttpServerResponseT = typeof http.ServerResponse;
@@ -37,10 +41,26 @@ const sessionIdByClient: Map<WebSocket, string> = new Map<WebSocket, string>();
     const sessionClientById: Map<string, WebSocket> = new Map<string, WebSocket>();
 const workspaceSync: WorkspaceSyncState = new WorkspaceSyncState();
 
+export function configuredAgentsForWorkspaceFolder(folder: Pick<vscode.WorkspaceFolder, "uri">): readonly string[] {
+    if (folder.uri.scheme !== "file") return [];
+    const agents: string[] = [];
+    if (existsSync(path.join(folder.uri.fsPath, "AGENTS.md"))) agents.push("codex");
+    if (existsSync(path.join(folder.uri.fsPath, "CLAUDE.md"))) agents.push("claude");
+    if (existsSync(path.join(folder.uri.fsPath, "AGENT.md"))) agents.push("grok");
+    return agents;
+}
+
 function currentWorkspaceFolders(): readonly WorkspaceFolderInfo[] {
     const configured: readonly vscode.WorkspaceFolder[] | undefined = vscode.workspace.workspaceFolders;
     const folders: readonly vscode.WorkspaceFolder[] = configured ? configured : [];
-    return folders.map((folder, index) => ({ name: folder.name, uri: folder.uri.toString(), index }));
+    return folders.map((folder, index) => {
+        return {
+          name: folder.name,
+          uri: folder.uri.toString(),
+          index,
+          configuredAgents: configuredAgentsForWorkspaceFolder(folder)
+        };
+    });
 }
 
 export interface CodAIgramBridgeApi {
@@ -51,6 +71,8 @@ export interface CodAIgramBridgeApi {
     readonly startCodex: () => Promise<Result<void, CodexRuntimeErrorT>>;
     readonly stopCodex: () => Promise<boolean>;
     readonly restartCodex: () => Promise<Result<void, CodexRuntimeErrorT>>;
+  readonly scanForTests: (workFolders: readonly string[]) => TestScanResult;
+  readonly scanForClasses: (workFolders: readonly string[]) => readonly ScannedClass[];
 }
 
 let codexRuntime: CodexRuntime | undefined;
@@ -60,6 +82,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
     codexRuntime = activeCodexRuntime;
     let token: string = randomBytes(32).toString("base64url");
     let tokenState: TokenStateT = "available";
+    const usedNonces: string[] = [];
     const activeOutput: vscode.OutputChannel = vscode.window.createOutputChannel("CodAIgram Bridge");
     output = ok(activeOutput);
     activeOutput.appendLine("CodAIgram Bridge activating.");
@@ -219,7 +242,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                           syncTimestamp: workspaceSync.currentTimestamp(),
                           folders: currentWorkspaceFolders()
                         }));
-                    } else if ((request.type === "chat" || request.type === "chat/ask") && request.syncTimestamp !== workspaceSync.currentTimestamp()) {
+                    } else if ((request.type === "scan/tests" || request.type === "scan/classes") && Array.isArray(request.workFolders)) {
+                        const scanResult: TestScanResult | readonly ScannedClass[] = request.type === "scan/tests" ? scanForTests(request.workFolders) : scanForClasses(request.workFolders);
+                        client.send(JSON.stringify({
+                          version: 1,
+                          type: request.type === "scan/tests" ? "scan_tests_response" : "scan_classes_response",
+                          id: request.id,
+                          result: scanResult
+                        }));
+                    } else if (request.type === "code/get" && typeof request.projectName === "string" && Array.isArray(request.workFolders) && typeof request.filepath === "string" && typeof request.typeName === "string") {
+                        const matchingCode: readonly string[] = getTypeCodes(request.workFolders, request.filepath, request.typeName);
+                        if (matchingCode.length === 0) {
+                            client.send(JSON.stringify({
+                              version: 1,
+                              type: "error",
+                              id: request.id,
+                              code: "code_not_found"
+                            }));
+                        } else {
+                            const code: string | readonly string[] = matchingCode.length === 1 ? matchingCode[0]! : matchingCode;
+                            client.send(JSON.stringify({
+                              version: 1,
+                              type: "code_response",
+                              id: request.id,
+                              projectName: request.projectName,
+                              code
+                            }));
+                        }
+                    } else if (isChatPromptRequest(request) && request.syncTimestamp !== workspaceSync.currentTimestamp()) {
                         client.send(JSON.stringify({
                           version: 1,
                           type: "error",
@@ -228,11 +278,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                           syncTimestamp: workspaceSync.currentTimestamp(),
                           required: ["workspace_folders"]
                         }));
-                    } else if ((request.type === "chat" || request.type === "chat/ask") && typeof request.prompt === "string") {
+                    } else if (isChatPromptRequest(request)) {
                         const state: ClientState | undefined = clients.get(client);
                         if (state) {
                             state.pendingChats.add(request.id);
-                            void handlePrompt(client, state, request.id, request.prompt, activeCodexRuntime);
+                            void handlePrompt(client, state, request.id, request.prompt, activeCodexRuntime, { cwd: request.cwd, workFolders: request.workFolders });
                         }
                     } else if (request.type === "cancel" && typeof request.targetId === "string") {
                         const targetId: string = request.targetId;
@@ -306,36 +356,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket server error: ${error.message}`);
     });
     httpServer.on("upgrade", (request, socket, head) => {
-        const rejectUnauthorized: () => void = () => {
-            if (output.isOk()) output.value.appendLine("CodAIgram Bridge rejected an unauthenticated WebSocket connection.");
+        type CredentialRouteT = "nonce" | "sessionid" | "unknown";
+        const rejectUnauthorized: (reason: string, route: CredentialRouteT) => void = (reason, route) => {
+            if (output.isOk()) output.value.appendLine(`FAILED WebSocket connection rejected; route=${route}; reason=${reason}.`);
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
             socket.destroy();
         };
         const listeningAddress: ReturnType<http.Server["address"]> = httpServer.address();
         if (!listeningAddress || typeof listeningAddress === "string") {
-            rejectUnauthorized();
+            rejectUnauthorized("listener-address-unavailable", "unknown");
             return;
         }
         const expectedPort: number = listeningAddress.port;
+        const requestPath: string = request.url ?? "/";
+        const route: CredentialRouteT = requestPath.startsWith("/session/") ? "sessionid" : "nonce";
         const suppliedHost: string | undefined = request.headers.host;
         if (typeof suppliedHost !== "string" ||
             (suppliedHost !== `localhost:${expectedPort}` && suppliedHost !== `127.0.0.1:${expectedPort}`)) {
-            rejectUnauthorized();
+            if (output.isOk()) output.value.appendLine(`FAILED Host validation; attemptedHost=${typeof suppliedHost === "string" ? suppliedHost : "<missing>"}; expectedHost=localhost:${expectedPort} or 127.0.0.1:${expectedPort}.`);
+            rejectUnauthorized("invalid-host", route);
             return;
         }
 
         const suppliedOrigin: string | undefined = request.headers.origin;
         const trustedOrigins: string[] = vscode.workspace.getConfiguration("codaigramBridge").get<string[]>("trustedOrigins", []);
         if (typeof suppliedOrigin !== "string" || !isAllowedOrigin(suppliedOrigin, trustedOrigins)) {
-            rejectUnauthorized();
+            const attemptedOrigin: string = typeof suppliedOrigin === "string" ? suppliedOrigin : "<missing>";
+            const allowedOrigins: string = trustedOrigins.length > 0 ? trustedOrigins.join(", ") : "<empty>";
+            if (output.isOk()) output.value.appendLine(`FAILED Origin validation; attemptedOrigin=${attemptedOrigin}; allowedOrigins=${allowedOrigins}; reason=${typeof suppliedOrigin !== "string" ? "missing-Origin-header" : "origin-not-in-codaigramBridge.trustedOrigins"}; action=edit the VS Code setting codaigramBridge.trustedOrigins.`);
+            rejectUnauthorized("untrusted-origin", route);
             return;
         }
 
-        if (!URL.canParse(request.url ?? "/", `ws://${host}`)) {
-            rejectUnauthorized();
+        if (!URL.canParse(requestPath, `ws://${host}`)) {
+            rejectUnauthorized("invalid-request-url", route);
             return;
         }
-        const requestUrl: URL = new URL(request.url ?? "/", `ws://${host}`);
+        const requestUrl: URL = new URL(requestPath, `ws://${host}`);
         const suppliedToken: string = requestUrl.pathname.startsWith("/") ? requestUrl.pathname.slice(1) : requestUrl.pathname;
         const expected: Buffer<ArrayBuffer> = Buffer.from(token, "utf8");
         const supplied: Buffer<ArrayBuffer> = Buffer.from(suppliedToken, "utf8");
@@ -353,7 +410,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         const isSessionRoute: boolean = suppliedSessionId.length > 0 &&
             (sessionStates.get(suppliedSessionId) === "available" || sessionDisconnected);
         if (!isNonceRoute && !isSessionRoute) {
-            rejectUnauthorized();
+            if (route === "sessionid") {
+                if (output.isOk()) output.value.appendLine(`FAILED sessionid authentication; attemptedSessionId=${suppliedSessionId}; reason=invalid-or-unavailable-sessionid.`);
+                rejectUnauthorized("invalid-or-unavailable-sessionid", route);
+            } else {
+                const wasRecentlyUsed: boolean = usedNonces.includes(suppliedToken);
+                // TEMPORARY DIAGNOSTIC: credential values are intentionally printed to diagnose local pairing failures.
+                if (output.isOk()) output.value.appendLine(`FAILED nonce authentication; attemptedNonce=${suppliedToken}; requiredNonce=${token}; alreadyUsed=${wasRecentlyUsed}.`);
+                rejectUnauthorized(wasRecentlyUsed ? "nonce-already-used" : "invalid-or-unavailable-nonce", route);
+            }
             return;
         }
 
@@ -369,10 +434,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         try {
             wsServer.handleUpgrade(request, socket, head, (client) => {
                 upgradeCompleted = true;
-                if (isNonceRoute) tokenState = "consumed";
+                if (isNonceRoute) {
+                    tokenState = "consumed";
+                    usedNonces.push(token);
+                    if (usedNonces.length > 10) usedNonces.shift();
+                }
                 sessionIdByClient.set(client, sessionId);
                 sessionClientById.set(sessionId, client);
-                if (output.isOk()) output.value.appendLine("CodAIgram Bridge authenticated a WebSocket client.");
+                if (output.isOk()) output.value.appendLine(`CodAIgram Bridge authenticated a WebSocket client; route=${isSessionRoute ? "sessionid" : "nonce"}.`);
                 wsServer.emit("connection", client, request);
             });
         } catch (error: unknown) {
@@ -443,7 +512,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         name: "codaigram_bridge",
         title: "CodAIgram Bridge",
         version: "0.0.1"
-      })
+      }),
+      scanForTests,
+      scanForClasses
     };
 }
 
@@ -456,7 +527,16 @@ function isAllowedOrigin(suppliedOrigin: string, trustedOrigins: readonly string
         parsedOrigin.origin !== suppliedOrigin || parsedOrigin.username !== "" || parsedOrigin.password !== "") {
         return false;
     }
-    return trustedOrigins.some((trustedOrigin) => trustedOrigin === suppliedOrigin);
+    return trustedOrigins.some((trustedOrigin) => {
+        if (trustedOrigin === suppliedOrigin) return true;
+        if (!trustedOrigin.endsWith(":*")) return false;
+        const wildcardBase: string = trustedOrigin.slice(0, -2);
+        if (!URL.canParse(`${wildcardBase}:0`)) return false;
+        const parsedTrusted: URL = new URL(`${wildcardBase}:0`);
+        if (parsedTrusted.username !== "" || parsedTrusted.password !== "" || parsedTrusted.pathname !== "/" ||
+            parsedTrusted.search !== "" || parsedTrusted.hash !== "") return false;
+        return parsedTrusted.protocol === parsedOrigin.protocol && parsedTrusted.hostname === parsedOrigin.hostname;
+    });
 }
 
 function logWarning(error: unknown): void {
@@ -465,7 +545,7 @@ function logWarning(error: unknown): void {
     }
 }
 
-async function handlePrompt(client: WebSocket, state: ClientState, id: string, prompt: string, runtime: CodexRuntime): Promise<void> {
+async function handlePrompt(client: WebSocket, state: ClientState, id: string, prompt: string, runtime: CodexRuntime, options: CodexPromptOptions = {}): Promise<void> {
     const onDelta: (delta: string) => void = (delta) => {
         const message: object = { version: 1, type: "chat_delta", id, delta };
         if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(message));
@@ -479,17 +559,17 @@ async function handlePrompt(client: WebSocket, state: ClientState, id: string, p
           data: notification.params
         }));
     };
-    let response: Result<string, CodexRuntimeErrorT> = await runtime.ask(prompt, onDelta, onEvent);
+    let response: Result<string, CodexRuntimeErrorT> = await runtime.ask(prompt, onDelta, onEvent, options);
     if (response.isErr() && response.error === "not_running") {
         const started: Result<void, CodexRuntimeErrorT> = await runtime.start({
           name: "codaigram_bridge",
           title: "CodAIgram Bridge",
           version: "0.0.1"
-        });
+        }, options);
         if (started.isErr()) {
             response = err(started.error);
         } else {
-            response = await runtime.ask(prompt, onDelta, onEvent);
+            response = await runtime.ask(prompt, onDelta, onEvent, options);
         }
     }
     if (!state.pendingChats.has(id)) return;
@@ -503,13 +583,36 @@ async function handlePrompt(client: WebSocket, state: ClientState, id: string, p
           response: response.value
         }));
     } else {
+        if (output.isOk()) logChatRequestFailure(id, response.error);
         client.send(JSON.stringify({
           version: 1,
           type: "error",
           id,
-          code: "codex_request_failed"
+          code: "codex_request_failed",
+          cause: response.error
         }));
     }
+}
+
+function logChatRequestFailure(requestId: string, errorCode: CodexRuntimeErrorT): void {
+    if (output.isErr()) return;
+    const workspaceFolders: readonly WorkspaceFolderInfo[] = currentWorkspaceFolders();
+    const workspaceDetails: readonly WorkspaceLogDetails[] = workspaceFolders.map((folder) => ({ name: folder.name, uri: folder.uri }));
+    const timestamp: string = new Date().toISOString();
+    const reason: string = describeChatFailure(errorCode, workspaceFolders.length);
+    output.value.appendLine(`[${timestamp}] CodAIgram Bridge chat request failed; requestId=${requestId}; code=${errorCode}; reason=${reason}; workspaceFolders=${JSON.stringify(workspaceDetails)}`);
+}
+
+interface WorkspaceLogDetails {
+    readonly name: string;
+    readonly uri: string;
+}
+
+function describeChatFailure(errorCode: CodexRuntimeErrorT, workspaceCount: number): string {
+    if (errorCode === "ambiguous_workspace") return `Codex needs exactly one workspace folder, but VS Code has ${workspaceCount}`;
+    if (errorCode === "no_workspace") return "Codex needs exactly one workspace folder, but VS Code has none";
+    if (errorCode === "unsupported_workspace_uri") return "Codex needs a local file-backed workspace folder";
+    return "Codex runtime could not complete the request; see code for the failed stage";
 }
 
 export async function deactivate(): Promise<void> {

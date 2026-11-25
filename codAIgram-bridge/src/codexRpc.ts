@@ -11,7 +11,7 @@ export interface CodexNotificationHandler {
     (notification: CodexNotification): void;
 }
 
-interface PendingRequest {
+interface PendingCodexRpcRequest {
     readonly resolve: (result: Result<unknown, string>) => void;
 }
 
@@ -25,7 +25,7 @@ interface JsonRpcRecord {
 
 export class CodexJsonRpcClient {
     private nextId: number = 2;
-    private readonly pending: Map<number, PendingRequest> = new Map<number, PendingRequest>();
+    private readonly pending: Map<number, PendingCodexRpcRequest> = new Map<number, PendingCodexRpcRequest>();
     private readonly handlers: Set<CodexNotificationHandler> = new Set<CodexNotificationHandler>();
     private readonly lines: readline.Interface;
     private state: "open" | "closed" = "open";
@@ -78,7 +78,7 @@ export class CodexJsonRpcClient {
         if (!message || typeof message !== "object") return;
         const record: JsonRpcRecord = message as JsonRpcRecord;
         if (typeof record.id === "number") {
-            const pending: PendingRequest | undefined = this.pending.get(record.id);
+            const pending: PendingCodexRpcRequest | undefined = this.pending.get(record.id);
             if (!pending) return;
             this.pending.delete(record.id);
             pending.resolve("error" in record ? err("request_failed") : ok(record.result));
@@ -95,7 +95,7 @@ export class CodexJsonRpcClient {
 
     private closePending(): void {
         this.state = "closed";
-        this.pending.forEach((pending: PendingRequest) => pending.resolve(err("process_closed")));
+        this.pending.forEach((pending: PendingCodexRpcRequest) => pending.resolve(err("process_closed")));
         this.pending.clear();
     }
 }

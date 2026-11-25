@@ -26,6 +26,7 @@ import { registerTokenGenerationCase } from "./extension.token-generation.case";
 import { registerShowPairingUrlCase } from "./extension.show-pairing-url.case";
 import { registerCopyButtonCase } from "./extension.copy-button.case";
 import { registerCopyPairingUrlCase } from "./extension.copy-pairing-url.case";
+import { registerClipboardNonceRotationCase } from "./extension.clipboard-nonce-rotation.case";
 import { registerRegenerateTokenCase } from "./extension.regenerate-token.case";
 import { registerRejectInvalidTokenCase } from "./extension.reject-invalid-token.case";
 import { registerConsumeTokenAfterFailedAuthCase } from "./extension.consume-token-after-failed-auth.case";
@@ -34,6 +35,7 @@ import { registerDynamicPortHttpCase } from "./extension.dynamic-port-http.case"
 import { registerRejectInvalidHostCase } from "./extension.reject-invalid-host.case";
 import { registerAcceptLocalhostHostCase } from "./extension.accept-localhost-host.case";
 import { registerTrustedOriginRequiredCase } from "./extension.trusted-origin-required.case";
+import { registerTrustedOriginWildcardCase } from "./extension.trusted-origin-wildcard.case";
 import { registerRejectDnsRebindingCase } from "./extension.reject-dns-rebinding.case";
 import { registerHttpsLocalhostWebsocketCase } from "./extension.https-localhost-websocket.case";
 import { registerWorkspaceSyncIntegration } from "./extension.workspace-sync.test";
@@ -41,6 +43,7 @@ import { registerBridgeClientConnectCase } from "./extension.bridge-client-conne
 import { registerBridgeClientFoldersCase } from "./extension.bridge-client-folders.case";
 import { registerBridgeClientPromptCase } from "./extension.bridge-client-prompt.case";
 import { registerSessionReconnectCase } from "./extension.session-reconnect.case";
+import { registerWorkspaceAgentsCase } from "./workspaceAgents.case";
 
 const scenario: string = process.env.CODAIGRAM_BRIDGE_SCENARIO ?? "auth";
 
@@ -61,6 +64,7 @@ if (scenario === "shutdown") {
 
             const client: ChildProcess = spawn(nodeExecutable, [scriptPath, String(api.port), api.token, openedPath, closedPath], { detached: true, stdio: "ignore", windowsHide: true });
             client.unref();
+            // Do not let the host proceed to shutdown until the detached client has received the welcome frame; this proves it is authenticated and still connected.
             await waitForFile(openedPath, 5_000);
         });
 
@@ -137,6 +141,7 @@ if (scenario === "shutdown") {
         registerCopyButtonCase(() => api);
 
         registerCopyPairingUrlCase(() => api);
+        registerClipboardNonceRotationCase(() => api);
 
         registerRegenerateTokenCase(() => api);
 
@@ -153,6 +158,7 @@ if (scenario === "shutdown") {
         registerAcceptLocalhostHostCase(() => api);
 
         registerTrustedOriginRequiredCase(() => api);
+        registerTrustedOriginWildcardCase(() => api);
 
         registerRejectDnsRebindingCase(() => api);
 
@@ -164,6 +170,7 @@ if (scenario === "shutdown") {
         registerBridgeClientFoldersCase(() => api, trustedOrigin);
         registerBridgeClientPromptCase(() => api, trustedOrigin);
         registerSessionReconnectCase(() => api, trustedOrigin);
+        registerWorkspaceAgentsCase(() => api);
 
         teardown(async () => {
             const portFile: string | undefined = process.env.CODAIGRAM_BRIDGE_PORT_FILE;
