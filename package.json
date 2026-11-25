@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "scanner"
+    "scanner",
+    "scan_shared"
   ],
   "version": "0.1.0",
   "engines": {
@@ -22,7 +23,7 @@
     "build:bridge-protocol": "npm --prefix bridge-protocol run compile",
     "build:bridge-mock": "npm run build:bridge-protocol && npm --prefix bridge-mock run compile",
     "seed:local": "node scripts/seed-local.mjs",
-    "test:visual": "npm run build:server-tests && npm run build:bridge-mock && node --test server/dist-tests/visual/*.test.js",
+    "test:visual": "npm run build:server-tests && npm run build:bridge-mock && npm --prefix codAIgram-bridge run compile && node --test server/dist-tests/visual/*.test.js",
     "verify": "npm run build && npm test",
     "dev:client": "npm run build:bridge-protocol && vite --config client/vite.config.ts --configLoader runner",
     "start:server": "node server/dist/index.js"

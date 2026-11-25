@@ -3,6 +3,7 @@ dist/
 dist-tests/
 dist-types/
 .artifacts/
+package-lock.json
 *.tsbuildinfo
 firebase-debug.log
 firestore-debug.log
@@ -11,3 +12,4 @@ logs/
 scanner.log
 .workbench/
 *.log
+*.flow.json
