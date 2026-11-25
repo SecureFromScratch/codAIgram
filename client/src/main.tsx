@@ -12,29 +12,35 @@ import { formatMember, type MemberDisplay, type Parameter } from './signatures';
 import { dslErrorsFor, dslErrorTooltip, dslHighlighting } from './dsl-highlighting';
 import { scheduleClick } from './click-timer';
 import { logAndThrow } from './client_utils';
+import { readAppStorageValue, writeAppStorageValue } from './app-storage';
+import type { AppStorageKeyT, AppStorageReadT } from './app-storage';
 import { loadTestsInventory, type TestCaseDetails } from './tests-inventory';
 import { createProject as createProjectRequest, DEFAULT_PROJECT_NAME, loadProjectNames, NEW_PROJECT_OPTION } from './projects';
 import { ClassWorkspaceModel, Model } from './workspace-model';
-import { connectToVscodeBridge, workspaceFolderDisplayPath, type VscodeBridgeConnectionT, type VscodeWorkspaceFolderT } from './vscode-bridge';
+import { bridgeConnectionFailureMessage, clearPersistedVscodeBridgeSession, connectToVscodeBridge, loadPersistedVscodeBridgeSession, savePersistedVscodeBridgeSession, workspaceFolderDisplayPath, type PersistedVscodeBridgeSessionT, type VscodeBridgeConnectionT, type VscodeWorkspaceFolderT } from './vscode-bridge';
+import { buildChatPromptOptions } from './chat-workspace';
+import type { GetCodeResult } from '@codaigram/bridge-protocol/client';
 import './style.css';
 
 window.logAndThrow = logAndThrow;
 
-const EDITOR_PERCENT_STORAGE_KEY: string = 'codaigram.editorPercent';
-const VSCODE_WORKSPACE_SELECTION_STORAGE_KEY: string = 'codaigram.vscodeBridgeWorkspaceUris';
-type ClassContextMenuT = { status: 'closed' } | { status: 'open'; className: string; x: number; y: number };
+type ClassContextMenuT = { status: 'closed' } | { status: 'open'; className: string; x: number; y: number; memberTooltip?: string; showActualCode?: boolean };
 type ChatPanelStateT = 'open' | 'closed';
 type NewProjectDialogStatusT = 'open' | 'closed';
 type ProjectSettingsDialogStatusT = 'open' | 'closed';
 type BridgeConnectionStatusT = 'connected' | 'disconnected';
 type BridgeRequestStatusT = 'idle' | 'connecting';
+type ChatMessageT = {
+  readonly role: 'user' | 'assistant';
+  readonly text: string;
+};
 
 function loadEditorPercent(): number {
   try {
-    // UNTRUST-ALLOW-NULLISH: Storage.getItem returns null when no split preference has been saved, so the missing value intentionally selects the default layout before the saved number is parsed.
-    const stored: string | null = window.localStorage.getItem(EDITOR_PERCENT_STORAGE_KEY);
-    if (!stored) return 42;
-    const parsed: number = Number(stored);
+    const key: AppStorageKeyT = 'editorPercent';
+    const stored: AppStorageReadT = readAppStorageValue(key);
+    if (stored.state === 'missing') return 42;
+    const parsed: number = Number(stored.value);
     return Number.isFinite(parsed) && parsed >= 20 && parsed <= 80 ? parsed : 42;
   } catch (error: unknown) {
     console.warn('Could not read the saved workspace split.', error);
@@ -44,7 +50,8 @@ function loadEditorPercent(): number {
 
 function saveEditorPercent(value: number): void {
   try {
-    window.localStorage.setItem(EDITOR_PERCENT_STORAGE_KEY, String(value));
+    const key: AppStorageKeyT = 'editorPercent';
+    writeAppStorageValue(key, String(value));
   } catch (error: unknown) {
     console.warn('Could not save the workspace split.', error);
   }
@@ -52,10 +59,10 @@ function saveEditorPercent(value: number): void {
 
 function loadVscodeWorkspaceSelection(): readonly string[] {
   try {
-    // UNTRUST-ALLOW-NULLISH: Storage.getItem returns null before workspace selection has been saved; an empty selection is the intentional first-connection state.
-    const stored: string | null = window.localStorage.getItem(VSCODE_WORKSPACE_SELECTION_STORAGE_KEY);
-    if (!stored) return [];
-    const parsed: unknown = JSON.parse(stored) as unknown;
+    const key: AppStorageKeyT = 'vscodeBridgeWorkspaceUris';
+    const stored: AppStorageReadT = readAppStorageValue(key);
+    if (stored.state === 'missing') return [];
+    const parsed: unknown = JSON.parse(stored.value) as unknown;
     return Array.isArray(parsed) && parsed.every((uri: unknown) => typeof uri === 'string') ? parsed : [];
   } catch (error: unknown) {
     console.warn('Could not read saved VS Code workspace selections.', error);
@@ -65,10 +72,25 @@ function loadVscodeWorkspaceSelection(): readonly string[] {
 
 function saveVscodeWorkspaceSelection(uris: readonly string[]): void {
   try {
-    window.localStorage.setItem(VSCODE_WORKSPACE_SELECTION_STORAGE_KEY, JSON.stringify(uris));
+    const key: AppStorageKeyT = 'vscodeBridgeWorkspaceUris';
+    writeAppStorageValue(key, JSON.stringify(uris));
   } catch (error: unknown) {
     console.warn('Could not save VS Code workspace selections.', error);
   }
+}
+
+type WorkspaceSelectionModeT = 'none' | 'agent' | 'folder';
+
+function workspaceSelectionMode(workspace: VscodeWorkspaceFolderT, selectedWorkspaceUris: readonly string[], selectedAgentUris: readonly string[]): WorkspaceSelectionModeT {
+  if (selectedWorkspaceUris.includes(workspace.uri)) return 'folder';
+  if (selectedAgentUris.includes(workspace.uri)) return 'agent';
+  return 'none';
+}
+
+function workspaceSelectionIcon(mode: WorkspaceSelectionModeT): string {
+  if (mode === 'agent') return '🤖';
+  if (mode === 'folder') return '📁';
+  return '☐';
 }
 
 function fitText(text: string, maxWidth: number, font: string): string {
@@ -87,10 +109,11 @@ function fitText(text: string, maxWidth: number, font: string): string {
   return `${prefix}…`;
 }
 
-function Editor({ initialText, onChange, onGoToClass, selection, hiddenNames }: {
+function Editor({ initialText, onChange, onGoToClass, onAskAbout, selection, hiddenNames }: {
   initialText: string;
   onChange: (value: string) => void;
   onGoToClass: (className: string) => void;
+  onAskAbout: (className: string, memberName: string) => void;
   selection: { revision: number; text: string };
   hiddenNames: (text: string) => readonly string[] }) {
   // UNTRUST-ALLOW-NULLISH: React initializes DOM refs as null before mounting and clears them on unmount; this boundary is checked before any DOM access.
@@ -98,6 +121,7 @@ function Editor({ initialText, onChange, onGoToClass, selection, hiddenNames }: 
   // UNTRUST-ALLOW-NULLISH: The editor view does not exist until React mounts it and is destroyed during cleanup; callers check this reference before use.
   const editor: React.RefObject<EditorView | null> = useRef<EditorView>(null);
   const selecting: React.RefObject<boolean> = useRef<boolean>(false);
+  const [memberMenu, setMemberMenu]: [ClassContextMenuT, React.Dispatch<React.SetStateAction<ClassContextMenuT>>] = useState<ClassContextMenuT>({ status: 'closed' });
   useEffect(() => {
     if (!host.current) return;
     const view: EditorView = new EditorView({
@@ -117,13 +141,33 @@ function Editor({ initialText, onChange, onGoToClass, selection, hiddenNames }: 
           },
           ...historyKeymap,
         ]), dslHighlighting, dslErrorsFor(hiddenNames), dslErrorTooltip, EditorView.contentAttributes.of({ 'aria-label': 'Diagram text' }), EditorView.updateListener.of(update => { if (update.docChanged && !selecting.current) onChange(update.state.doc.toString()); })] }) });
+    const onContextMenu = (event: MouseEvent): void => {
+      const position: number | null = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (position === null) return;
+      const line: string = view.state.doc.lineAt(position).text;
+      if (!/^\s{2}\S/.test(line)) return;
+      let className: string = '';
+      const currentLineNumber: number = view.state.doc.lineAt(position).number;
+      for (let lineNumber: number = currentLineNumber; lineNumber > 0; lineNumber--) {
+        const candidate: string = view.state.doc.line(lineNumber).text;
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(candidate.trim()) && !/^\s/.test(candidate)) {
+          className = candidate.trim();
+          break;
+        }
+      }
+      if (!className) return;
+      event.preventDefault();
+      setMemberMenu({ status: 'open', className, x: event.clientX, y: event.clientY, memberTooltip: line.trim() });
+    };
+    view.dom.addEventListener('contextmenu', onContextMenu);
     editor.current = view;
     return () => {
       // UNTRUST-ALLOW-NULLISH: React editor refs use null as their unmounted state; clear the reference before destroying the view so later effects cannot use a stale instance.
       editor.current = null;
+      view.dom.removeEventListener('contextmenu', onContextMenu);
       view.destroy();
     };
-  }, [initialText, onChange, hiddenNames]);
+  }, [initialText, onChange, onAskAbout, hiddenNames]);
   useEffect(() => {
     if (!editor.current || selection.revision === 0) return;
     selecting.current = true;
@@ -135,7 +179,25 @@ function Editor({ initialText, onChange, onGoToClass, selection, hiddenNames }: 
       annotations: Transaction.addToHistory.of(false) });
     selecting.current = false;
   }, [selection]);
-  return <div className="editor" ref={host} />;
+  useEffect(() => {
+    if (memberMenu.status !== 'open') return;
+    const close = (event: Event): void => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      if (event instanceof MouseEvent && event.target instanceof Node && host.current?.contains(event.target)) return;
+      setMemberMenu({ status: 'closed' });
+    };
+    window.addEventListener('keydown', close);
+    window.addEventListener('click', close);
+    return () => {
+      window.removeEventListener('keydown', close);
+      window.removeEventListener('click', close);
+    };
+  }, [memberMenu.status]);
+  return <div className="editor" ref={host}>
+    {memberMenu.status === 'open' ? <div className="class-context-menu" role="menu" aria-label="Text member actions" style={{ left: memberMenu.x, top: memberMenu.y }} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
+      <button type="button" role="menuitem" onClick={() => { onAskAbout(memberMenu.className, memberMenu.memberTooltip?.split(/[(:]/)[0]?.trim() ?? ''); setMemberMenu({ status: 'closed' }); }}>Ask about...</button>
+    </div> : ''}
+  </div>;
 }
 
 type TooltipStateT = { visible: false } | {
@@ -150,6 +212,8 @@ type ClassTooltipStateT = { visible: false } | {
   name: string;
   sourceFile: string;
   modifiedAt: string;
+  sourceCodeState: 'not-requested' | 'loading' | 'loaded' | 'unavailable';
+  sourceCode: string;
   left: number;
   top: number;
 };
@@ -183,16 +247,21 @@ function MethodTooltip({ member, left, top, anchorTop }: {
   </div>;
 }
 
-function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, onEditChain }: {
+function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, onEditChain, onAskAbout, onGetActualCode }: {
   diagram: Diagram;
   partialRetention: 'retain' | 'discard';
   visible: readonly string[];
   focusRequest: { className: string; revision: number };
   onSelect: (name: string, exclusive: boolean) => void;
-  onEditChain: (name: string) => void }) {
+  onEditChain: (name: string) => void;
+  onAskAbout: (className: string, memberName: string) => void;
+  onGetActualCode: (className: string, sourceFile: string) => Promise<string> }) {
   const [tooltip, setTooltip]: [TooltipStateT, React.Dispatch<React.SetStateAction<TooltipStateT>>] = useState<TooltipStateT>({ visible: false });
   const [classTooltip, setClassTooltip]: [ClassTooltipStateT, React.Dispatch<React.SetStateAction<ClassTooltipStateT>>] = useState<ClassTooltipStateT>({ visible: false });
   const [contextMenu, setContextMenu]: [ClassContextMenuT, React.Dispatch<React.SetStateAction<ClassContextMenuT>>] = useState<ClassContextMenuT>({ status: 'closed' });
+  const [actualCodeClasses, setActualCodeClasses]: [ReadonlySet<string>, React.Dispatch<React.SetStateAction<ReadonlySet<string>>>] = useState<ReadonlySet<string>>(new Set<string>());
+  const [actualCodeCache, setActualCodeCache]: [ReadonlyMap<string, string>, React.Dispatch<React.SetStateAction<ReadonlyMap<string, string>>>] = useState<ReadonlyMap<string, string>>(new Map<string, string>());
+  const actualCodeRequests: React.RefObject<Set<string>> = useRef<Set<string>>(new Set<string>());
   // UNTRUST-ALLOW-NULLISH: React initializes DOM refs as null before mounting and clears them on unmount; this boundary is checked before any DOM access.
   const host: React.RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null);
   const graphScroll: React.RefObject<{ left: number; top: number }> = useRef({ left: 0, top: 0 });
@@ -440,14 +509,48 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
       if (details.isOk() && details.value.sourceFile && details.value.modifiedAt) {
         const bounds: DOMRect = classNameElement.getBoundingClientRect();
         const parent: DOMRect = container.getBoundingClientRect();
+        const showCode: boolean = actualCodeClasses.has(name);
+        const cachedCode: string | undefined = actualCodeCache.get(name);
         setClassTooltip({
           visible: true,
           name,
           sourceFile: details.value.sourceFile,
           modifiedAt: details.value.modifiedAt,
+          sourceCodeState: showCode ? cachedCode ? 'loaded' : 'loading' : 'not-requested',
+          sourceCode: cachedCode ?? '',
           left: Math.max(8, Math.min(bounds.left - parent.left, parent.width - 288)),
           top: Math.max(8, bounds.bottom - parent.top + 6),
         });
+        if (showCode && !cachedCode && !actualCodeRequests.current.has(name)) {
+          actualCodeRequests.current.add(name);
+          onGetActualCode(name, details.value.sourceFile).then((code: string) => {
+            actualCodeRequests.current.delete(name);
+            setActualCodeCache((current: ReadonlyMap<string, string>) => new Map<string, string>(current).set(name, code));
+            setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
+              visible: true,
+              name: current.name,
+              sourceFile: current.sourceFile,
+              modifiedAt: current.modifiedAt,
+              sourceCodeState: 'loaded',
+              sourceCode: code,
+              left: current.left,
+              top: current.top,
+            } : current);
+          }).catch((error: unknown) => {
+            actualCodeRequests.current.delete(name);
+            console.warn(`Could not retrieve source code for ${name}.`, error);
+            setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
+              visible: true,
+              name: current.name,
+              sourceFile: current.sourceFile,
+              modifiedAt: current.modifiedAt,
+              sourceCodeState: 'unavailable',
+              sourceCode: '',
+              left: current.left,
+              top: current.top,
+            } : current);
+          });
+        }
       }
       return;
     }
@@ -469,13 +572,48 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
   const allMembers: string[] = [...diagram.members, ...(diagram.classes ?? []).flatMap((item: Diagram) => item.members)];
   const member: MemberDisplay = tooltip.visible ? (allMembers.map((item: string) => formatMember(item)).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
   const clickTimer: React.RefObject<number> = useRef<number>(0);
+  const contextMenuElement: React.RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null);
+  const contextMenuIsOpen: React.RefObject<boolean> = useRef<boolean>(false);
+  const suppressCanvasClick: React.RefObject<boolean> = useRef<boolean>(false);
   useEffect(() => () => window.clearTimeout(clickTimer.current), []);
+  useEffect(() => {
+    if (contextMenu.status !== 'open') return;
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        contextMenuIsOpen.current = false;
+        setContextMenu({ status: 'closed' });
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [contextMenu.status]);
+  useEffect(() => {
+    if (contextMenu.status !== 'open') return;
+    const closeOnOutsideClick = (event: MouseEvent): void => {
+      const target: EventTarget | null = event.target;
+      if (!contextMenuIsOpen.current || (target instanceof Node && contextMenuElement.current?.contains(target))) return;
+      event.stopPropagation();
+      suppressCanvasClick.current = true;
+      contextMenuIsOpen.current = false;
+      setContextMenu({ status: 'closed' });
+    };
+    window.addEventListener('click', closeOnOutsideClick, true);
+    return () => window.removeEventListener('click', closeOnOutsideClick, true);
+  }, [contextMenu.status]);
   function selectedClass(target: EventTarget): string {
     if (!(target instanceof Element)) return '';
     return target.closest('[data-class-name]')?.getAttribute('data-class-name') ?? '';
   }
   function handleCanvasClick(event: React.MouseEvent<HTMLDivElement>): void {
-    if (contextMenu.status === 'open') setContextMenu({ status: 'closed' });
+    if (suppressCanvasClick.current) {
+      suppressCanvasClick.current = false;
+      return;
+    }
+    if (contextMenuIsOpen.current) {
+      contextMenuIsOpen.current = false;
+      setContextMenu({ status: 'closed' });
+      return;
+    }
     const name: string = selectedClass(event.target);
     if (!name) return;
     if (event.detail > 1) {
@@ -485,15 +623,29 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     window.clearTimeout(clickTimer.current);
     clickTimer.current = scheduleClick(() => onSelect(name, false));
   }
+  function handleCanvasClickCapture(event: React.MouseEvent<HTMLDivElement>): void {
+    if (!contextMenuIsOpen.current) return;
+    if (event.target instanceof Node && contextMenuElement.current?.contains(event.target)) return;
+    event.stopPropagation();
+    suppressCanvasClick.current = true;
+    contextMenuIsOpen.current = false;
+    setContextMenu({ status: 'closed' });
+  }
   function handleCanvasContextMenu(event: React.MouseEvent<HTMLDivElement>): void {
     const name: string = selectedClass(event.target);
     if (!name) return;
     event.preventDefault();
+    contextMenuIsOpen.current = true;
+    const target: Element | null = event.target instanceof Element ? event.target.closest('[data-method-index]') : null;
+    const memberTooltip: string | undefined = target?.getAttribute('data-method-tooltip') ?? undefined;
+    const classNameTarget: Element | null = event.target instanceof Element ? event.target.closest('text[joint-selector="headerText"], text[joint-selector="label"]') : null;
     setContextMenu({
       status: 'open',
       className: name,
       x: event.clientX,
-      y: event.clientY
+      y: event.clientY,
+      ...(memberTooltip ? { memberTooltip } : {}),
+      ...(classNameTarget ? { showActualCode: true } : {}),
     });
   }
   function handleCanvasDoubleClick(event: React.MouseEvent<HTMLDivElement>): void {
@@ -501,13 +653,20 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     const name: string = selectedClass(event.target);
     if (name) onSelect(name, true);
   }
-  return <div className="canvas-shell" onClick={handleCanvasClick} onContextMenu={handleCanvasContextMenu} onDoubleClick={handleCanvasDoubleClick} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }}>
+  return <div className="canvas-shell" onClickCapture={handleCanvasClickCapture} onClick={handleCanvasClick} onContextMenu={handleCanvasContextMenu} onDoubleClick={handleCanvasDoubleClick} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }}>
     <div className="canvas" role="img" aria-label={`Diagram of ${diagram.title} with ${diagram.targets.map((relation: Relation) => relation.target).join(', ')}`} ref={host} />
     {tooltip.visible && member ? <MethodTooltip member={member} left={tooltip.left} top={tooltip.top} anchorTop={tooltip.anchorTop} /> : ''}
-    {classTooltip.visible ? <div role="tooltip" className="method-tooltip" style={{ left: classTooltip.left, top: classTooltip.top }}><strong>{classTooltip.name}</strong><div>File: {classTooltip.sourceFile}</div><div>Modified: <time dateTime={classTooltip.modifiedAt}>{classTooltip.modifiedAt}</time></div></div> : ''}
-    {contextMenu.status === 'open' ? <div className="class-context-menu" role="menu" aria-label="Class actions" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
-      <button type="button" role="menuitem" onClick={() => { onSelect(contextMenu.className, false); setContextMenu({ status: 'closed' }); }}>Show class</button>
-      <button type="button" role="menuitem" onClick={() => { onEditChain(contextMenu.className); setContextMenu({ status: 'closed' }); }}>Edit chain</button>
+    {classTooltip.visible ? <div role="tooltip" className="method-tooltip" style={{ left: classTooltip.left, top: classTooltip.top }}><strong>{classTooltip.name}</strong><div>File: {classTooltip.sourceFile}</div><div>Modified: <time dateTime={classTooltip.modifiedAt}>{classTooltip.modifiedAt}</time></div>{classTooltip.sourceCodeState !== 'not-requested' ? <><hr />{classTooltip.sourceCodeState === 'loaded' ? <pre className="actual-code-snippet">{classTooltip.sourceCode}</pre> : classTooltip.sourceCodeState === 'unavailable' ? <div>Code unavailable</div> : <div>Loading code…</div>}</> : ''}</div> : ''}
+    {contextMenu.status === 'open' ? <div ref={contextMenuElement} className="class-context-menu" role="menu" aria-label="Class actions" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
+      {contextMenu.showActualCode ? <button type="button" role="menuitemcheckbox" aria-checked={actualCodeClasses.has(contextMenu.className)} onClick={() => setActualCodeClasses((current: ReadonlySet<string>) => {
+        const updated: Set<string> = new Set<string>(current);
+        if (updated.has(contextMenu.className)) updated.delete(contextMenu.className);
+        else updated.add(contextMenu.className);
+        return updated;
+      })}><span aria-hidden="true">{actualCodeClasses.has(contextMenu.className) ? '☑' : '☐'}</span> Show actual code</button> : ''}
+      {contextMenu.memberTooltip ? <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onAskAbout(contextMenu.className, contextMenu.memberTooltip?.split(/[(:]/)[0]?.trim() ?? ''); setContextMenu({ status: 'closed' }); }}>Ask about...</button> : ''}
+      <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onSelect(contextMenu.className, false); setContextMenu({ status: 'closed' }); }}>Show class</button>
+      <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onEditChain(contextMenu.className); setContextMenu({ status: 'closed' }); }}>Edit chain</button>
     </div> : ''}
   </div>;
 }
@@ -570,8 +729,8 @@ function diagramFromModel(preferredNames: readonly string[], referenceText: stri
   return classDetailsToDiagramSet(details);
 }
 
-type WorkspacePropsT = { initialText: string; initial: Diagram | undefined; };
-function Workspace({ initialText, initial }: WorkspacePropsT) {
+type WorkspacePropsT = { initialText: string; initial: Diagram | undefined; onAskAbout: (className: string, memberName: string) => void; onGetActualCode: (className: string, sourceFile: string) => Promise<string>; };
+function Workspace({ initialText, initial, onAskAbout, onGetActualCode }: WorkspacePropsT) {
   const [diagram, setDiagram]: [Diagram | undefined, React.Dispatch<React.SetStateAction<Diagram | undefined>>] = useState<Diagram | undefined>(initial);
   const [partialRetention, setPartialRetention]: ['retain' | 'discard', React.Dispatch<React.SetStateAction<'retain' | 'discard'>>] = useState<'retain' | 'discard'>('discard');
   const [message, setMessage]: [string, React.Dispatch<React.SetStateAction<string>>] = useState('Diagram is up to date');
@@ -662,30 +821,15 @@ function Workspace({ initialText, initial }: WorkspacePropsT) {
       text: exclusive ? classText(name) : shown.map(classText).join('\n\n') }));
   }
   function editChain(rootName: string): void {
-    const classNames: readonly string[] = Model.current.getClassNames();
-    const visited: Set<string> = new Set<string>();
-    const ordered: string[] = [];
-    function visit(className: string): void {
-      if (visited.has(className)) return;
-      const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
-      if (!classModel.isOk() || classModel.value.state === 'deleted') return;
-      visited.add(className);
-      ordered.push(className);
-      const neighbors: Set<string> = new Set<string>(classModel.value.relations.map((relation) => relation.target));
-      classNames.forEach((candidateName: string) => {
-        const candidate: Result<ClassDetails, Error> = Model.current.tryGetModel(candidateName);
-        if (candidate.isOk() && candidate.value.relations.some((relation) => relation.target === className)) neighbors.add(candidateName);
-      });
-      neighbors.forEach(visit);
-    }
-    visit(rootName);
+    const ordered: readonly ClassDetails[] = Model.current.getClassChain(rootName);
     if (ordered.length === 0) return;
-    document.current = { shown: ordered, validity: 'valid' };
-    setVisible(ordered);
+    const orderedNames: string[] = ordered.map((details: ClassDetails) => details.name);
+    document.current = { shown: orderedNames, validity: 'valid' };
+    setVisible(orderedNames);
     setMessage('Diagram is up to date');
     setSelection((previous: { revision: number; text: string }) => ({
       revision: previous.revision + 1,
-      text: ordered.map(classText).join('\n\n'),
+      text: orderedNames.map(classText).join('\n\n'),
     }));
   }
   function updateEditorPercent(clientX: number): void {
@@ -728,15 +872,18 @@ function Workspace({ initialText, initial }: WorkspacePropsT) {
     };
     const getSelectionHook: () => readonly string[] = () => [...document.current.shown];
     const tryGetModelHook: (name: string) => Result<ClassDetails, Error> = (name: string) => Model.current.tryGetModel(name);
+    const getClassChainHook: (name: string) => readonly ClassDetails[] = (name: string) => Model.current.getClassChain(name);
     if (window.__app) {
       window.__app.selectClass = selectClassHook;
       window.__app.getSelection = getSelectionHook;
       window.__app.tryGetModel = tryGetModelHook;
+      window.__app.getClassChain = getClassChainHook;
     } else {
       window.__app = {
         selectClass: selectClassHook,
         getSelection: getSelectionHook,
         tryGetModel: tryGetModelHook,
+        getClassChain: getClassChainHook,
       };
     }
     return () => {
@@ -744,6 +891,7 @@ function Workspace({ initialText, initial }: WorkspacePropsT) {
       delete window.__app.selectClass;
       delete window.__app.getSelection;
       delete window.__app.tryGetModel;
+      delete window.__app.getClassChain;
       if (Object.keys(window.__app).length === 0) delete window.__app;
     };
   });
@@ -765,6 +913,7 @@ function Workspace({ initialText, initial }: WorkspacePropsT) {
           initialText={initialText}
           onChange={change}
           onGoToClass={(className: string) => setGraphFocus((previous: { className: string; revision: number }) => ({ className, revision: previous.revision + 1 }))}
+          onAskAbout={onAskAbout}
           selection={selection}
           hiddenNames={hiddenNames}
         />
@@ -811,6 +960,8 @@ function Workspace({ initialText, initial }: WorkspacePropsT) {
           focusRequest={graphFocus}
           onSelect={select}
           onEditChain={editChain}
+          onAskAbout={onAskAbout}
+          onGetActualCode={onGetActualCode}
         /> : <div className="canvas-shell"><div className="canvas" role="img" aria-label="Empty diagram canvas" /></div>}
       </section>
     </section>
@@ -824,7 +975,7 @@ type LoadedStateT = {
 };
 type LoadStateT = { status: 'loading' } | { status: 'error' } | LoadedStateT;
 type TestsLoadStateT = { status: 'loading' } | { status: 'error' } | { status: 'ready'; tests: readonly TestCaseDetails[] };
-type ModeT = 'classes' | 'tests';
+type ModeT = 'classes' | 'tests' | 'semantics';
 
 type TopbarPropsT = {
   mode: ModeT;
@@ -845,6 +996,7 @@ function Topbar({ mode, onModeChange, chatState, onChatToggle, projectName, proj
     <nav className="mode-tabs" aria-label="Workspace mode">
       <button type="button" role="tab" aria-selected={mode === 'classes'} className={mode === 'classes' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('classes')}>Classes</button>
       <button type="button" role="tab" aria-selected={mode === 'tests'} className={mode === 'tests' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('tests')}>Tests</button>
+      <button type="button" role="tab" aria-selected={mode === 'semantics'} className={mode === 'semantics' ? 'mode-tab selected' : 'mode-tab'} onClick={() => onModeChange('semantics')}>Semantics</button>
     </nav>
     <div className="badge">EARLY PREVIEW</div>
     <div className="project-switcher">
@@ -876,21 +1028,53 @@ function Topbar({ mode, onModeChange, chatState, onChatToggle, projectName, proj
   </header>;
 }
 
-function ChatPanel({ onClose }: { onClose: () => void }) {
+function ChatPanel({ onClose, bridgeConnectionStatus, onConnect, onSend, askAboutHeader }: {
+  onClose: () => void;
+  bridgeConnectionStatus: BridgeConnectionStatusT;
+  onConnect: () => void;
+  onSend: (prompt: string) => Promise<string>;
+  askAboutHeader: string | undefined;
+}) {
+  const [draft, setDraft]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
+  const [messages, setMessages]: [readonly ChatMessageT[], React.Dispatch<React.SetStateAction<readonly ChatMessageT[]>>] = useState<readonly ChatMessageT[]>([]);
+  const [sending, setSending]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
+  const [sendError, setSendError]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
+
+  async function sendPrompt(): Promise<void> {
+    const prompt: string = draft.trim();
+    if (bridgeConnectionStatus !== 'connected' || prompt.length === 0 || sending) return;
+    setMessages((current: readonly ChatMessageT[]) => [...current, { role: 'user', text: prompt }]);
+    setDraft('');
+    setSendError('');
+    setSending(true);
+    try {
+      const response: string = await onSend(prompt);
+      setMessages((current: readonly ChatMessageT[]) => [...current, { role: 'assistant', text: response }]);
+    } catch (error: unknown) {
+      console.error(`[${new Date().toISOString()}] Chat prompt failed through the VS Code bridge.`, error);
+      setSendError(error instanceof Error ? error.message : 'The VS Code bridge could not answer the prompt.');
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <aside className="chat-panel" aria-label="Chat panel">
       <div className="chat-panel-heading">
-        <h2>Chat</h2>
+        <h2>{askAboutHeader ?? 'Chat'}</h2>
         <button type="button" aria-label="Close chat panel" onClick={onClose}>x</button>
       </div>
       <div className="chat-transcript" role="log" aria-live="polite">
         <p>Ask a question about the current diagram.</p>
+        {messages.map((message: ChatMessageT, index: number) => <p key={`${message.role}-${index}`} data-chat-role={message.role}>{message.text}</p>)}
+        {sendError ? <p role="alert">{sendError}</p> : ''}
       </div>
       <div className="chat-composer">
         <label className="visually-hidden" htmlFor="chat-message">Message</label>
-        <textarea id="chat-message" aria-label="Message" placeholder="Write a message..." />
-        <button type="button" disabled>Send</button>
+        <textarea id="chat-message" aria-label="Message" placeholder="Write a message..." value={draft} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(event.currentTarget.value)} />
+        <button type="button" disabled={bridgeConnectionStatus !== 'connected' || draft.trim().length === 0 || sending} onClick={() => { void sendPrompt(); }}>Send</button>
       </div>
+      {bridgeConnectionStatus !== 'connected' ? <p className="chat-connect-required"><span>You must connect to vscode first</span> <button type="button" onClick={onConnect}>Connect</button></p> : ''}
     </aside>
   );
 }
@@ -935,10 +1119,12 @@ function VscodeBridgeSettingsDialog({
   connectionUrl,
   workspaces,
   selectedWorkspaceUris,
+  selectedAgentUris,
   errorMessage,
   onCancel,
   onConnectionUrlChange,
   onWorkspaceToggle,
+  onWorkspaceCycle,
   onConnect,
 }: {
   connectionStatus: BridgeConnectionStatusT;
@@ -946,10 +1132,12 @@ function VscodeBridgeSettingsDialog({
   connectionUrl: string;
   workspaces: readonly VscodeWorkspaceFolderT[];
   selectedWorkspaceUris: readonly string[];
+  selectedAgentUris: readonly string[];
   errorMessage: string;
   onCancel: () => void;
   onConnectionUrlChange: (value: string) => void;
   onWorkspaceToggle: (uri: string) => void;
+  onWorkspaceCycle: (uri: string) => void;
   onConnect: () => void;
 }) {
   return <div className="project-dialog-backdrop">
@@ -960,15 +1148,16 @@ function VscodeBridgeSettingsDialog({
       </div>
       {connectionStatus === 'connected' ? <section aria-label="Available VS Code workspaces">
         {workspaces.length > 0 ? <ul className="vscode-workspace-list">{workspaces.map((workspace: VscodeWorkspaceFolderT) => {
-          const selected: boolean = selectedWorkspaceUris.includes(workspace.uri);
+          const mode: WorkspaceSelectionModeT = workspaceSelectionMode(workspace, selectedWorkspaceUris, selectedAgentUris);
+          const selected: boolean = mode === 'folder';
           return <li key={`${workspace.index}:${workspace.uri}`}>
-            <label><input
+            <label><i className="workspace-selection-icon" aria-hidden="true">{workspaceSelectionIcon(mode)}</i><input
               type="checkbox"
               aria-label={workspace.name}
               checked={selected}
               disabled={selected && selectedWorkspaceUris.length === 1}
               onChange={() => onWorkspaceToggle(workspace.uri)}
-            /><strong>{workspace.name}</strong></label><span>{workspaceFolderDisplayPath(workspace.uri, workspace.name)}</span>
+            /><button type="button" className="workspace-selection-cycle" aria-label={`Cycle selection for ${workspace.name}`} onClick={() => onWorkspaceCycle(workspace.uri)}><strong>{workspace.name}</strong></button></label><span>{workspaceFolderDisplayPath(workspace.uri, workspace.name)}</span>
           </li>;
         })}</ul> : <p className="vscode-workspace-empty">No workspace folders are open in VS Code.</p>}
       </section> : <div className="vscode-bridge-connect-form">
@@ -1000,28 +1189,55 @@ function TestsWorkspace({ tests }: { tests: readonly TestCaseDetails[] }) {
   });
   return <section className="workspace"><section className="pane tests-pane"><div className="pane-heading"><div><span className="eyebrow">INVENTORY</span><h1>Tests</h1></div><span className="file-badge">{tests.length} CASES</span></div><p className="hint">Tests discovered from the project server source.</p><nav className="tests-tree" aria-label="Tests inventory"><ul className="tests-tree-root">{Array.from(byGroup.entries(), ([groupName, groupTests]: [string, TestCaseDetails[]]) => <li key={groupName} className="test-group"><span className="tree-group-label">{groupName}</span><ul>{groupTests.map((test: TestCaseDetails) => <li key={`${test.group}.${test.name}`} className="test-case"><span>{test.name}</span><small>{test.description}</small></li>)}</ul></li>)}</ul></nav></section><section className="pane graph-pane tests-preview"><div className="pane-heading"><h2>Test flow</h2><span className="file-badge">COMING LATER</span></div><div className="tests-placeholder">A sequence-diagram view will appear here.</div></section></section>;
 }
+
+function SemanticsWorkspace() {
+  return <section className="semantics-page" aria-labelledby="semantics-page-title">
+    <h1 id="semantics-page-title" className="semantics-page-heading">Semantics</h1>
+    <section className="workspace semantics-workspace" aria-label="Semantics panes">
+      <section className="pane semantics-pane semantics-glossary-pane" aria-labelledby="semantics-glossary-title">
+        <div className="pane-heading">
+          <h2 id="semantics-glossary-title">Glossary</h2>
+        </div>
+        <div className="semantics-content">Glossary entries will appear here.</div>
+      </section>
+      <section className="pane semantics-pane semantics-references-pane" aria-labelledby="semantics-references-title">
+        <div className="pane-heading">
+          <h2 id="semantics-references-title">References</h2>
+        </div>
+        <div className="semantics-content">Semantic references will appear here.</div>
+      </section>
+    </section>
+  </section>;
+}
+
 function App() {
   const [state, setState]: [LoadStateT, React.Dispatch<React.SetStateAction<LoadStateT>>] = useState<LoadStateT>({ status: 'loading' });
   const [testsState, setTestsState]: [TestsLoadStateT, React.Dispatch<React.SetStateAction<TestsLoadStateT>>] = useState<TestsLoadStateT>({ status: 'loading' });
   const [mode, setMode]: [ModeT, React.Dispatch<React.SetStateAction<ModeT>>] = useState<ModeT>('classes');
   const [chatState, setChatState]: [ChatPanelStateT, React.Dispatch<React.SetStateAction<ChatPanelStateT>>] = useState<ChatPanelStateT>('closed');
+  const [askAboutHeader, setAskAboutHeader]: [string | undefined, React.Dispatch<React.SetStateAction<string | undefined>>] = useState<string | undefined>(undefined);
   const [projectName, setProjectName]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>(DEFAULT_PROJECT_NAME);
   const [projects, setProjects]: [string[], React.Dispatch<React.SetStateAction<string[]>>] = useState<string[]>([]);
   const [newProjectDialog, setNewProjectDialog]: [NewProjectDialogStatusT, React.Dispatch<React.SetStateAction<NewProjectDialogStatusT>>] = useState<NewProjectDialogStatusT>('closed');
   const [projectSettingsDialog, setProjectSettingsDialog]: [ProjectSettingsDialogStatusT, React.Dispatch<React.SetStateAction<ProjectSettingsDialogStatusT>>] = useState<ProjectSettingsDialogStatusT>('closed');
-  const [bridgeUrl, setBridgeUrl]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
+  const [bridgeSession, setBridgeSession]: [PersistedVscodeBridgeSessionT | undefined, React.Dispatch<React.SetStateAction<PersistedVscodeBridgeSessionT | undefined>>] = useState<PersistedVscodeBridgeSessionT | undefined>(loadPersistedVscodeBridgeSession);
   const [bridgeInput, setBridgeInput]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
-  const [bridgeConfigured, setBridgeConfigured]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
+  const [bridgeConfigured, setBridgeConfigured]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(Boolean(bridgeSession));
   const [bridgeConnectionStatus, setBridgeConnectionStatus]: [BridgeConnectionStatusT, React.Dispatch<React.SetStateAction<BridgeConnectionStatusT>>] = useState<BridgeConnectionStatusT>('disconnected');
   const [bridgeRequestStatus, setBridgeRequestStatus]: [BridgeRequestStatusT, React.Dispatch<React.SetStateAction<BridgeRequestStatusT>>] = useState<BridgeRequestStatusT>('idle');
   const [bridgeWorkspaces, setBridgeWorkspaces]: [readonly VscodeWorkspaceFolderT[], React.Dispatch<React.SetStateAction<readonly VscodeWorkspaceFolderT[]>>] = useState<readonly VscodeWorkspaceFolderT[]>([]);
   const [selectedWorkspaceUris, setSelectedWorkspaceUris]: [readonly string[], React.Dispatch<React.SetStateAction<readonly string[]>>] = useState<readonly string[]>(loadVscodeWorkspaceSelection);
+  const [selectedAgentUris, setSelectedAgentUris]: [readonly string[], React.Dispatch<React.SetStateAction<readonly string[]>>] = useState<readonly string[]>([]);
   const [workspaceTimestamp, setWorkspaceTimestamp]: [number, React.Dispatch<React.SetStateAction<number>>] = useState<number>(0);
   const [bridgeError, setBridgeError]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
   // UNTRUST-ALLOW-NULLISH: The bridge client is absent before connecting and after disconnect; identity checks guard all client cleanup and state updates.
   const bridgeClient: React.RefObject<VscodeBridgeConnectionT['client'] | null> = useRef<VscodeBridgeConnectionT['client'] | null>(null);
   // UNTRUST-ALLOW-NULLISH: The disconnect subscription starts absent before connection and is cleared when the bridge client closes or the app unmounts, so null is its deliberate initial state.
   const bridgeDisconnectSubscription: React.RefObject<(() => void) | null> = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!bridgeSession) return;
+    void connectBridge(bridgeSession.endpoint, bridgeSession.sessionId);
+  }, []);
   useEffect(() => {
     const controller: AbortController = new AbortController();
     loadProjectNames(controller.signal).then((names: string[]) => {
@@ -1111,17 +1327,19 @@ function App() {
     setNewProjectDialog('open');
   }
   function openProjectSettings(): void {
-    setBridgeInput(bridgeUrl);
+    setBridgeInput('');
     setBridgeError('');
     setProjectSettingsDialog('open');
-    if (bridgeConfigured && bridgeUrl.length > 0) void connectBridge(bridgeUrl);
+    if (bridgeSession && bridgeConnectionStatus !== 'connected' && bridgeRequestStatus !== 'connecting') {
+      void connectBridge(bridgeSession.endpoint, bridgeSession.sessionId);
+    }
   }
-  async function connectBridge(connectionLink: string): Promise<void> {
+  async function connectBridge(connectionLink: string, sessionId?: string): Promise<void> {
     setBridgeRequestStatus('connecting');
     if (!bridgeConfigured) setBridgeConnectionStatus('disconnected');
     setBridgeError('');
     try {
-      const connection: VscodeBridgeConnectionT = await connectToVscodeBridge(connectionLink.trim());
+      const connection: VscodeBridgeConnectionT = await connectToVscodeBridge(connectionLink.trim(), sessionId);
       if (bridgeDisconnectSubscription.current) bridgeDisconnectSubscription.current();
       // UNTRUST-ALLOW-NULLISH: Replace the prior optional subscription before attaching the new client's disconnect callback, preventing stale cleanup from being invoked later.
       bridgeDisconnectSubscription.current = null;
@@ -1137,22 +1355,29 @@ function App() {
           setBridgeConnectionStatus('disconnected');
         }
       });
-      setBridgeUrl(connectionLink.trim());
       setBridgeInput(connectionLink.trim());
+      setBridgeSession(connection.session);
+      savePersistedVscodeBridgeSession(connection.session);
       setBridgeConfigured(true);
       setBridgeConnectionStatus('connected');
       setBridgeWorkspaces(connection.workspaces);
       setSelectedWorkspaceUris((current: readonly string[]) => {
         const stillAvailable: string[] = current.filter((uri: string) => connection.workspaces.some((workspace: VscodeWorkspaceFolderT) => workspace.uri === uri));
-        return stillAvailable.length > 0 ? stillAvailable : connection.workspaces.map((workspace: VscodeWorkspaceFolderT) => workspace.uri);
+        return stillAvailable;
       });
+      setSelectedAgentUris((current: readonly string[]) => current.filter((uri: string) => connection.workspaces.some((workspace: VscodeWorkspaceFolderT) => workspace.uri === uri)));
       setWorkspaceTimestamp(Date.now());
     } catch (error: unknown) {
       console.warn('VS Code bridge connection failed.', error);
-      setBridgeError(error instanceof Error ? error.message : 'Could not connect to the VS Code bridge.');
-      if (!bridgeConfigured) setBridgeConfigured(false);
+      setBridgeError(bridgeConnectionFailureMessage(error));
+      if (sessionId) {
+        clearPersistedVscodeBridgeSession();
+        // UNTRUST-ALLOW-NULLISH: A rejected reconnect invalidates the persisted session; clearing this state returns the settings dialog to manual bridge pairing with no stale endpoint.
+        setBridgeSession(undefined);
+        setBridgeConfigured(false);
+      }
       setBridgeConnectionStatus('disconnected');
-      if (!bridgeConfigured) {
+      if (sessionId || !bridgeConfigured) {
         setBridgeWorkspaces([]);
         setWorkspaceTimestamp(0);
       }
@@ -1175,6 +1400,45 @@ function App() {
       return [...current, uri];
     });
   }
+  function cycleWorkspaceSelection(uri: string): void {
+    const workspace: VscodeWorkspaceFolderT | undefined = bridgeWorkspaces.find((candidate: VscodeWorkspaceFolderT) => candidate.uri === uri);
+    if (!workspace) return;
+    const mode: WorkspaceSelectionModeT = workspaceSelectionMode(workspace, selectedWorkspaceUris, selectedAgentUris);
+    if (mode === 'none') {
+      if (workspace.configuredAgents.length > 0) {
+        setSelectedAgentUris((current: readonly string[]) => current.includes(uri) ? current : [...current, uri]);
+      } else {
+        setSelectedWorkspaceUris((current: readonly string[]) => current.includes(uri) ? current : [...current, uri]);
+      }
+      return;
+    }
+    if (mode === 'agent') {
+      setSelectedAgentUris((current: readonly string[]) => current.filter((selectedUri: string) => selectedUri !== uri));
+      setSelectedWorkspaceUris((current: readonly string[]) => current.includes(uri) ? current : [...current, uri]);
+      return;
+    }
+    setSelectedWorkspaceUris((current: readonly string[]) => current.filter((selectedUri: string) => selectedUri !== uri));
+  }
+  async function sendChatPrompt(prompt: string): Promise<string> {
+    // UNTRUST-ALLOW-NULLISH: The bridge client is intentionally absent while disconnected; the following guard converts that transient UI state into a stable user-facing error.
+    const client: VscodeBridgeConnectionT['client'] | null = bridgeClient.current;
+    if (!client || bridgeConnectionStatus !== 'connected') logAndThrow(new Error('Connect to the VS Code bridge before sending a prompt.'));
+    // UNTRUST-ALLOW-UNLOGGED-THROW: Rejections from the bridge are caught and logged by ChatPanel.sendPrompt, which presents the same failure to the user.
+    return client.promptAi(prompt, buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris));
+  }
+  async function getActualCodeForClass(className: string, sourceFile: string): Promise<string> {
+    // UNTRUST-ALLOW-NULLISH: Raw source retrieval is delegated to the existing VS Code Bridge API and is unavailable until the user has paired a live bridge client.
+    const client: VscodeBridgeConnectionT['client'] | null = bridgeClient.current;
+    if (!client || bridgeConnectionStatus !== 'connected') logAndThrow(new Error('Connect to the VS Code bridge to retrieve source code.'));
+    const options: ReturnType<typeof buildChatPromptOptions> = buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris);
+    const roots: readonly string[] = [options.cwd, ...options.workFolders];
+    const code: GetCodeResult = await client.getCode(projectName, roots, sourceFile, className);
+    return typeof code === 'string' ? code : code.join('\n\n');
+  }
+  function openAskAbout(className: string, memberName: string): void {
+    setAskAboutHeader(`Ask about ${memberName} in ${className}`);
+    setChatState('open');
+  }
   return <main>
     <Topbar
       mode={mode}
@@ -1187,8 +1451,8 @@ function App() {
       onNewProject={promptForProjectName}
       onProjectSettings={openProjectSettings}
     />
-    {mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace key={projectName} initialText={state.text} initial={state.diagram} /> : testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} />}
-    {chatState === 'open' ? <ChatPanel onClose={() => setChatState('closed')} /> : ""}
+    {mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace key={projectName} initialText={state.text} initial={state.diagram} onAskAbout={openAskAbout} onGetActualCode={getActualCodeForClass} /> : mode === 'tests' ? testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} /> : <SemanticsWorkspace />}
+    {chatState === 'open' ? <ChatPanel onClose={() => setChatState('closed')} bridgeConnectionStatus={bridgeConnectionStatus} onConnect={openProjectSettings} onSend={sendChatPrompt} askAboutHeader={askAboutHeader} /> : ""}
     {newProjectDialog === 'open' ? <NewProjectDialog onCancel={() => setNewProjectDialog('closed')} onCreate={createNewProject} /> : ''}
     {projectSettingsDialog === 'open' ? <VscodeBridgeSettingsDialog
       connectionStatus={bridgeConnectionStatus}
@@ -1196,10 +1460,12 @@ function App() {
       connectionUrl={bridgeInput}
       workspaces={bridgeWorkspaces}
       selectedWorkspaceUris={selectedWorkspaceUris}
+      selectedAgentUris={selectedAgentUris}
       errorMessage={bridgeError}
       onCancel={() => setProjectSettingsDialog('closed')}
       onConnectionUrlChange={setBridgeInput}
       onWorkspaceToggle={toggleWorkspaceSelection}
+      onWorkspaceCycle={cycleWorkspaceSelection}
       onConnect={() => { void connectBridge(bridgeInput); }}
     /> : ''}
   </main>;

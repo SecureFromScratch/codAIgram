@@ -23,6 +23,7 @@ export function formatMember(member: string, writableFields: readonly string[] =
   const method: RegExpMatchArray | string[] = member.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$/) ?? [];
   const name: string = method.at(1) ?? '';
   const argumentText: string = method.at(2) ?? '';
+  const methodLabel: string = `${name}()`;
   if (!name) {
     const field: RegExpMatchArray | string[] = member.match(/^(\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*)(.*)$/) ?? [];
     const fieldName: string = (field.at(1) ?? '').trim().replace(/\s*:\s*$/, '');
@@ -31,7 +32,7 @@ export function formatMember(member: string, writableFields: readonly string[] =
     return { text, tooltip: text };
   }
   if (!argumentText.trim()) return {
-    text: name,
+    text: methodLabel,
     tooltip: `${name}()`,
     parameters: [] };
   const argumentsList: string[] = [];
@@ -41,10 +42,10 @@ export function formatMember(member: string, writableFields: readonly string[] =
     const character: string = argumentText.charAt(position);
     if (character === '<' || character === '[' || character === '(') depth++;
     if ((character === '>' && argumentText.charAt(position - 1) !== '=') || character === ']' || character === ')') depth--;
-    if (depth < 0) return { text: name, tooltip: member };
+    if (depth < 0) return { text: methodLabel, tooltip: member };
     if (character === ',' && depth === 0) { argumentsList.push(argumentText.slice(start, position)); start = position + 1; }
   }
-  if (depth !== 0) return { text: name, tooltip: member };
+  if (depth !== 0) return { text: methodLabel, tooltip: member };
   argumentsList.push(argumentText.slice(start));
   const names: string[] = [];
   const parameters: Parameter[] = [];
@@ -57,7 +58,7 @@ export function formatMember(member: string, writableFields: readonly string[] =
       names.push(argument.trim());
       continue;
     }
-    if (!parameterName || !type) return { text: name, tooltip: member };
+    if (!parameterName || !type) return { text: methodLabel, tooltip: member };
     names.push(parameterName);
     const mutable: boolean = !/^(?:readonly\b|Readonly\s*<|ReadonlyArray\s*<)/.test(type) && !/^(?:string|number|boolean|bigint|symbol|undefined|null|void|never|unknown|any|integer|positive|datetime)(?:\s*\|\s*(?:string|number|boolean))*$/.test(type);
     const parameter: Parameter = {
@@ -67,5 +68,5 @@ export function formatMember(member: string, writableFields: readonly string[] =
     parameters.push(parameter);
   }
   const tooltip: string = [`${name}(${names.join(', ')})`, ...parameters.map((parameter: Parameter) => `-${parameter.name}: ${parameter.type}`)].join('\n');
-  return { text: name, tooltip, parameters };
+  return { text: methodLabel, tooltip, parameters };
 }

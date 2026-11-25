@@ -14,6 +14,8 @@ type ModelListenerT = {
   callback: (change: ModelChangeT) => void;
 };
 
+type InitializationStateT = 'uninitialized' | 'initialized';
+
 function sameValue(left: unknown, right: unknown): boolean {
   // UNTRUST-ALLOW-NULLISH: An omitted optional field is represented internally as undefined; compare that absence explicitly before JSON serialization loses it.
   if (left === undefined || right === undefined) return left === right;
@@ -33,12 +35,34 @@ export class ClassWorkspaceModel {
   readonly #classes: Map<string, ClassDetails> = new Map();
   readonly #changes: Map<string, Map<keyof ClassDetails, unknown[]>> = new Map();
   readonly #listeners: Set<ModelListenerT> = new Set();
+  #initializationState: InitializationStateT = 'uninitialized';
 
   get current(): ReadonlyMap<string, ClassDetails> { return this.#classes; }
   get changes(): ReadonlyMap<string, ReadonlyMap<keyof ClassDetails, readonly unknown[]>> { return this.#changes; }
 
   getClassNames(): readonly string[] {
     return Array.from(this.#classes.keys());
+  }
+
+  getClassChain(rootName: string): readonly ClassDetails[] {
+    const visited: Set<string> = new Set<string>();
+    const ordered: ClassDetails[] = [];
+    const classNames: readonly string[] = this.getClassNames();
+    const visit = (className: string): void => {
+      if (visited.has(className)) return;
+      const result: Result<ClassDetails, Error> = this.tryGetModel(className);
+      if (!result.isOk() || result.value.state === 'deleted') return;
+      visited.add(className);
+      ordered.push(result.value);
+      const neighbors: Set<string> = new Set<string>(result.value.relations.map((relation) => relation.target));
+      classNames.forEach((candidateName: string) => {
+        const candidate: Result<ClassDetails, Error> = this.tryGetModel(candidateName);
+        if (candidate.isOk() && candidate.value.relations.some((relation) => relation.target === className)) neighbors.add(candidateName);
+      });
+      neighbors.forEach(visit);
+    };
+    visit(rootName);
+    return ordered;
   }
 
   tryGetModel(className: string): Result<ClassDetails, Error> {
@@ -48,6 +72,15 @@ export class ClassWorkspaceModel {
   }
 
   initClasses(classes: readonly ClassDetails[]): void {
+    if (this.#initializationState === 'uninitialized' && this.#classes.size === 0 && classes.length > 0) {
+      classes.forEach((candidate: ClassDetails) => {
+        const details: ClassDetails = parseClassDetails(candidate, throwInvalidClassDetails);
+        this.#classes.set(details.name, details);
+      });
+      this.#initializationState = 'initialized';
+      return;
+    }
+    this.#initializationState = 'initialized';
     const previous: Set<string> = new Set(this.#classes.keys());
     classes.forEach((item: ClassDetails) => {
       const classId: string = item.name;
@@ -86,6 +119,19 @@ export class ClassWorkspaceModel {
         // UNTRUST-ALLOW-NULLISH: A missing optional class attribute maps to undefined; retaining this value is necessary to record an attribute deletion.
         const after: unknown = nextAttributes.get(attribute);
         if (sameValue(before, after)) return;
+        // UNTRUST-ALLOW-NULLISH: The optional sourceFile deletion branch distinguishes an absent path from a defined path so it can clear auxiliary display-metadata history while still notifying subscribers.
+        if (attribute === 'sourceFile' && after === undefined) {
+          // Removing an optional source annotation updates subscribers but clears its history because it is display metadata, not diagram content.
+          const existingChanges: Map<keyof ClassDetails, unknown[]> | undefined = this.#changes.get(classId);
+          if (existingChanges) {
+            existingChanges.delete(attribute);
+          } else {
+            const emptyChanges: Map<keyof ClassDetails, unknown[]> = new Map();
+            this.#changes.set(classId, emptyChanges);
+          }
+          this.#emit({ classId, attribute, before, after });
+          return;
+        }
         this.#record(classId, attribute, before, after);
       });
       this.#classes.set(classId, next);
@@ -162,7 +208,6 @@ export class ClassWorkspaceModel {
     // UNTRUST-ALLOW-NULLISH: History index zero may be undefined when an attribute did not exist before the first update; that baseline is required for detecting a full revert.
     if (history.length > 1 && sameValue(history[0], after)) {
       byAttribute.delete(attribute);
-      if (byAttribute.size === 0) this.#changes.delete(classId);
     }
     this.#emit({ classId, attribute, before, after });
   }

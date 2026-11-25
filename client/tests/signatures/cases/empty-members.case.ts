@@ -17,14 +17,14 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
 export function registerEmptyMembersCase(): void {
   it(TEST_CASE_METADATA.title, () => {
     expect(formatMember('recalcLayout()')).toEqual({
-      text: 'recalcLayout',
+      text: 'recalcLayout()',
       tooltip: 'recalcLayout()',
       parameters: [] });
     expect(formatMember('OWNS classes: Class[]')).toEqual({
       text: 'OWNS classes: Class[]',
       tooltip: 'OWNS classes: Class[]' });
     expect(formatMember('foo(x: Map<string, number>)')).toEqual({
-      text: 'foo',
+      text: 'foo()',
       tooltip: 'foo(x)\n-x: ✏️Map<string, number>',
       parameters: [{ name: 'x', type: '✏️Map<string, number>' }] });
   });

@@ -11,6 +11,10 @@
             "symbol": "window.setTimeout", 
             "message": "Use the owned click timer.", 
             "allowPaths": ["client/src/click-timer.ts"] 
+        }, { 
+            "symbol": "window.localStorage", 
+            "message": "Use the namespaced application storage adapter.", 
+            "allowPaths": ["client/src/app-storage.ts"] 
         }
     ], 
     "ruleSeverities": { "UBR007": "error" } 

@@ -9,6 +9,7 @@ declare global {
       selectClass?: (name: string) => void;
       getSelection?: () => readonly string[];
       tryGetModel?: (name: string) => Result<ClassDetails, Error>;
+      getClassChain?: (name: string) => readonly ClassDetails[];
       isVscodeBridgeConnected?: () => boolean;
       isVscodeBridgeConfigured?: () => boolean;
       workspacesLastFetchTimestamp?: () => number;

@@ -19,7 +19,7 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
 export function registerParameterTooltipCase(): void {
   it(TEST_CASE_METADATA.title, () => {
     expect(formatMember('addClass(name: string, publicMethods: string[])')).toEqual({
-      text: 'addClass',
+      text: 'addClass()',
       tooltip: 'addClass(name, publicMethods)\n-name: string\n-publicMethods: ✏️string[]',
       parameters: [{ name: 'name', type: 'string' }, { name: 'publicMethods', type: '✏️string[]' }] });
   });
