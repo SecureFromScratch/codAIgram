@@ -105,10 +105,11 @@ async function startHttpsFixture(): Promise<{ server: https.Server; url: string;
     try {
         execFileSync("certutil.exe", ["-user", "-store", "Root", caThumbprint], { stdio: "ignore" });
     } catch (error: unknown) {
+        console.warn("Current-user test CA lookup failed; checking machine trust store.", error instanceof Error ? error.message : String(error));
         try {
             execFileSync("certutil.exe", ["-store", "Root", caThumbprint], { stdio: "ignore" });
         } catch (machineStoreError: unknown) {
-            console.warn("Test CA was not found in the current-user or machine trust store; attempting current-user installation.", machineStoreError instanceof Error ? "error" : "non-error failure");
+            console.warn("Machine test CA lookup failed; attempting current-user installation.", machineStoreError instanceof Error ? machineStoreError.message : String(machineStoreError));
             execFileSync("certutil.exe", ["-user", "-addstore", "Root", caCertificatePath], { stdio: "ignore" });
         }
     }
@@ -314,10 +315,14 @@ async function main(): Promise<void> {
     if (!supportsHttpsFixture(process.platform)) {
         console.warn("*********************************************\n*********************************************\nHTTPS certificate integration test is unsupported on Linux and will be skipped.\n*********************************************\n*********************************************");
     }
+    // UNTRUST-ALLOW-NULLISH: This optional test-runner filter is absent during normal runs, which must execute every integration scenario.
     const selectedScenario: string | undefined = process.env.CODAIGRAM_BRIDGE_ONLY_SCENARIO;
+    // UNTRUST-ALLOW-NULLISH: Only when the optional scenario filter is explicitly configured do we branch from the default run of all three host scenarios.
     if (selectedScenario !== undefined) {
         if (selectedScenario !== "auth" && selectedScenario !== "concurrency" && selectedScenario !== "shutdown") {
-            throw new Error(`Unknown CODAIGRAM_BRIDGE_ONLY_SCENARIO: ${selectedScenario}`);
+            console.error(`Unknown CODAIGRAM_BRIDGE_ONLY_SCENARIO: ${selectedScenario}`);
+            process.exitCode = 1;
+            return;
         }
         await runScenario(selectedScenario);
         return;

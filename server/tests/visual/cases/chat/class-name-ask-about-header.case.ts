@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import type { Locator } from 'playwright';
+import { test } from 'node:test';
+import type { ClassDetails } from '../../../../dist/memory-repository.js';
+import type { TestCaseMetadata } from '../../../test-case-metadata.js';
+import { page, setVisualClasses } from '../../test-support.js';
+
+const CLASS_NAME: string = 'AskAboutClassName';
+const CLASSES: readonly ClassDetails[] = [{
+  name: CLASS_NAME,
+  methods: [{ name: 'run', overloads: [[]] }],
+  relations: [],
+}];
+
+export const TEST_CASE_METADATA: TestCaseMetadata = {
+  title: 'opens chat from the class name bar with the class name italicized',
+  prompt: {
+    availability: 'available',
+    history: [
+      { when: '2026/11/25 00:00', text: 'Add a visual test: right-click the empty portion of a class name bar, choose Ask about..., and verify chat opens with “Ask about <class name>” where the class name is italicized.' },
+    ],
+  },
+};
+
+export function registerClassNameAskAboutHeaderCase(): void {
+  test(TEST_CASE_METADATA.title, async () => {
+    await setVisualClasses(CLASSES);
+    await page.reload();
+
+    const classBox: Locator = page.locator(`[data-class-name="${CLASS_NAME}"]`);
+    const header: Locator = classBox.locator('rect[joint-selector="header"]');
+    const title: Locator = classBox.locator('text[joint-selector="headerText"]');
+    await header.waitFor();
+    await title.waitFor();
+    const hitPoint: { x: number; y: number } = await page.evaluate((className: string) => {
+      const headerElement: SVGRectElement | null = document.querySelector(`[data-class-name="${className}"] rect[joint-selector="header"]`);
+      const titleElement: SVGTextElement | null = document.querySelector(`[data-class-name="${className}"] text[joint-selector="headerText"]`);
+      if (!headerElement || !titleElement) window.logAndThrow(new Error('Expected the class name bar and title.'));
+      const headerBounds: DOMRect = headerElement.getBoundingClientRect();
+      const titleBounds: DOMRect = titleElement.getBoundingClientRect();
+      const x: number = headerBounds.right - 5;
+      if (x <= titleBounds.right) window.logAndThrow(new Error('The test class title must leave unused space in its name bar.'));
+      return { x, y: headerBounds.top + headerBounds.height / 2 };
+    }, CLASS_NAME);
+
+    await page.mouse.click(hitPoint.x, hitPoint.y, { button: 'right' });
+    const menu: Locator = page.getByRole('menu', { name: 'Class actions' });
+    await menu.waitFor();
+    await menu.getByRole('menuitem', { name: 'Ask about...' }).click();
+
+    const chat: Locator = page.getByRole('complementary', { name: 'Chat panel' });
+    await chat.waitFor();
+    const heading: Locator = chat.getByRole('heading', { name: `Ask about ${CLASS_NAME}` });
+    await heading.waitFor();
+    assert.equal(await heading.innerText(), `Ask about ${CLASS_NAME}`);
+    assert.equal(await heading.locator('em').innerText(), CLASS_NAME);
+  });
+}

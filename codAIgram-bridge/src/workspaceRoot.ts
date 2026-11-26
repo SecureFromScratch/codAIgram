@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { err, ok, Result } from "neverthrow";
+import type { WorkspaceFoldersT } from "./workspaceFolders";
 
 export type WorkspaceRootErrorT = "no_workspace" | "ambiguous_workspace" | "unsupported_workspace_uri";
-type WorkspaceFoldersT = typeof vscode.workspace.workspaceFolders;
 
 export function resolveWorkspaceFolders(folders: readonly Pick<vscode.WorkspaceFolder, "uri">[]): Result<string, WorkspaceRootErrorT> {
     if (folders.length === 0) return err("no_workspace");

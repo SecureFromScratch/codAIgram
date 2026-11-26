@@ -2,8 +2,8 @@ import * as assert from "node:assert";
 import * as path from "node:path";
 import { WebSocketServer } from "ws";
 import NodeWebSocket from "ws";
-import { createBridgeClient } from "@codaigram/bridge-protocol";
-import type { BridgeClient, BridgeSocket, GetCodeResult, ScanClassResult, ScanTestsResult } from "@codaigram/bridge-protocol";
+import { BridgeClient } from "@codaigram/bridge-protocol";
+import type { BridgeSocket, GetCodeResult, ScanClassResult, ScanTestsResult } from "@codaigram/bridge-protocol";
 import type { BridgeApi } from "./extension.helpers";
 import type { TestCaseMetadata } from "../testCaseMetadata";
 import { getTypeCodes } from "@codaigram/scan-shared";
@@ -13,11 +13,19 @@ type ChatRequestT = {
   readonly id: string;
   readonly cwd: string;
   readonly workFolders: readonly string[];
+  readonly projectName: string;
+  readonly relatedFile: string;
+  readonly relatedClass: string;
+  readonly relatedMember: string;
 };
 
 type PromptRequestSnapshotT = {
   readonly cwd: string;
   readonly workFolders: readonly string[];
+  readonly projectName: string;
+  readonly relatedFile: string;
+  readonly relatedClass: string;
+  readonly relatedMember: string;
 };
 type CodeRequestT = {
   readonly projectName?: string;
@@ -59,14 +67,20 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
                     const chatRequest: ChatRequestT = request as ChatRequestT;
                     promptRequests.push({
                       cwd: chatRequest.cwd,
-                      workFolders: chatRequest.workFolders
+                      workFolders: chatRequest.workFolders,
+                      projectName: chatRequest.projectName,
+                      relatedFile: chatRequest.relatedFile,
+                      relatedClass: chatRequest.relatedClass,
+                      relatedMember: chatRequest.relatedMember
                     });
-                    socket.send(JSON.stringify({
+                    const response: string = JSON.stringify({
                       version: 1,
                       type: "chat_response",
                       id: request.id,
                       response: "Lincoln"
-                    }));
+                    });
+                    const responseDelayMs: number = promptRequests.length === 1 ? 1_100 : 0;
+                    setTimeout(() => socket.send(response), responseDelayMs);
                 }
                 if (request.type === "scan/tests") socket.send(JSON.stringify({
                   version: 1,
@@ -82,7 +96,7 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
                 }));
                 if (request.type === "code/get") {
                     const codeRequest: CodeRequestT = request as CodeRequestT;
-                    if (codeRequest.projectName !== "mock-project") socket.send(JSON.stringify({
+                    if (codeRequest.projectName !== "mock-project" && codeRequest.projectName !== "bbb") socket.send(JSON.stringify({
                       version: 1,
                       type: "error",
                       id: request.id,
@@ -107,7 +121,7 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
                       code: "invalid_filepath"
                     }));
                     else {
-                        const codes: readonly string[] = getTypeCodes(codeRequest.workFolders, codeRequest.filepath, codeRequest.typeName ?? "");
+                        const codes: readonly string[] = getTypeCodes(codeRequest.workFolders, codeRequest.filepath, codeRequest.typeName ?? "", codeRequest.projectName ?? "");
                         if (codes.length === 0) socket.send(JSON.stringify({
                           version: 1,
                           type: "error",
@@ -124,14 +138,25 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
                 }
             });
         });
-        const client: BridgeClient = createBridgeClient(`ws://127.0.0.1:${address.port}/test-token`, trustedOrigin, (url, origin) => new NodeWebSocket(url, { headers: { Origin: origin } }) as unknown as BridgeSocket);
+        const client: BridgeClient = new BridgeClient(`ws://127.0.0.1:${address.port}/test-token`, trustedOrigin, (url, origin) => new NodeWebSocket(url, { headers: { Origin: origin } }) as unknown as BridgeSocket, 1_000, { chatTimeoutMs: 2_000 });
         try {
             await client.ready;
-            const response: string = await client.promptAi("Who was the president of the US during the Civil War? Respond with only the family name.", { cwd: "C:\\workspace", workFolders: [] });
+            const response: string = await client.promptAi("Who was the president of the US during the Civil War? Respond with only the family name.", {
+              cwd: "C:\\workspace",
+              workFolders: [],
+              projectName: "mock-project",
+              relatedFile: "src/president.ts",
+              relatedClass: "President",
+              relatedMember: "term"
+            });
             assert.strictEqual(response, "Lincoln");
             const configuredResponse: string = await client.promptAi("Inspect both folders", {
               cwd: "C:\\workspace-main",
-              workFolders: ["C:\\workspace-additional"]
+              workFolders: ["C:\\workspace-additional"],
+              projectName: "mock-project",
+              relatedFile: "",
+              relatedClass: "",
+              relatedMember: ""
             });
             assert.strictEqual(configuredResponse, "Lincoln");
             const testsScan: ScanTestsResult = await client.scanForTests(["C:\\workspace-main"]);
@@ -141,6 +166,19 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
             const classCode: GetCodeResult = await client.getCode("mock-project", [path.resolve(__dirname, "../../../../scanner/mock-testproject")], "src/class-details.ts", "ClassDetails");
             assert.equal(typeof classCode, "string");
             assert.match(classCode as string, /class\s+ClassDetails|interface\s+ClassDetails/);
+            const projectNameRoots: readonly string[] = [
+              path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-root"),
+              path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-lower"),
+              path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-title"),
+              path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-mixed")
+            ];
+            const projectNameMatches: GetCodeResult = await client.getCode("bbb", projectNameRoots, "cases/ccc.ts", "ProjectNamedType");
+            assert.ok(Array.isArray(projectNameMatches));
+            assert.strictEqual(projectNameMatches.length, 4);
+            assert.deepStrictEqual(
+              projectNameMatches.map((snippet: string) => snippet.match(/marker:\s*"([^"]+)"/u)?.[1]).sort(),
+              ["BbB", "Bbb", "bbb", "root"]
+            );
             const multiRoots: readonly string[] = [
               path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-one"),
               path.resolve(__dirname, "../../../../codAIgram-bridge/tests/mock-get-code-project-two"),
@@ -159,14 +197,39 @@ export function registerBridgeClientPromptCase(_getApi: () => BridgeApi, trusted
             await assert.rejects(() => client.getCode("mock-project", [mockProjectRoot], "src/class-details.ts", "NoSuchType"), /type_not_found/);
             await assert.rejects(() => client.getCode("mock-project", [path.join(mockProjectRoot, "src")], "src/class-details.ts", "ClassDetails"), /type_not_found/);
             assert.deepStrictEqual(promptRequests, [
-              { cwd: "C:\\workspace", workFolders: [] },
+              {
+                cwd: "C:\\workspace",
+                workFolders: [],
+                projectName: "mock-project",
+                relatedFile: "src/president.ts",
+                relatedClass: "President",
+                relatedMember: "term"
+              },
               {
                 cwd: "C:\\workspace-main",
-                workFolders: ["C:\\workspace-additional"]
+                workFolders: ["C:\\workspace-additional"],
+                projectName: "mock-project",
+                relatedFile: "",
+                relatedClass: "",
+                relatedMember: ""
               }
             ]);
-            await assert.rejects(() => client.promptAi("Inspect", { cwd: "", workFolders: [] }), /cwd must not be empty/);
-            await assert.rejects(() => client.promptAi("Inspect", { cwd: "C:\\workspace", workFolders: [""] }), /workFolders must be a list of non-empty paths/);
+            await assert.rejects(() => client.promptAi("Inspect", {
+              cwd: "",
+              workFolders: [],
+              projectName: "mock-project",
+              relatedFile: "",
+              relatedClass: "",
+              relatedMember: ""
+            }), /cwd must not be empty/);
+            await assert.rejects(() => client.promptAi("Inspect", {
+              cwd: "C:\\workspace",
+              workFolders: [""],
+              projectName: "mock-project",
+              relatedFile: "",
+              relatedClass: "",
+              relatedMember: ""
+            }), /workFolders must be a list of non-empty paths/);
         } finally {
             await client.close();
             await new Promise<void>((resolve) => server.close(() => resolve()));

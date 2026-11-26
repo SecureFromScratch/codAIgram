@@ -37,12 +37,14 @@ export const TEST_CASE_METADATA: TestCaseMetadataT = {
 
 export function registerChatWorkspaceOptionsCase(): void {
   it(TEST_CASE_METADATA.title, () => {
-    expect(buildChatPromptOptions(WORKSPACES, [THIRD_WORKSPACE_URI], [SECOND_WORKSPACE_URI])).toEqual({ cwd: 'C:/work/two', workFolders: ['C:/work/three'] });
-    expect(buildChatPromptOptions(WORKSPACES, [], [SECOND_WORKSPACE_URI, FIRST_WORKSPACE_URI])).toEqual({ cwd: 'C:/work/one', workFolders: ['C:/work/two'] });
-    expect(buildChatPromptOptions(WORKSPACES, [THIRD_WORKSPACE_URI, SECOND_WORKSPACE_URI], [])).toEqual({ cwd: 'C:/work/two', workFolders: ['C:/work/three'] });
-    expect(buildChatPromptOptions(WORKSPACES, [], [])).toEqual({
+    const promptDefaults: object = { projectName: 'mock-project', relatedFile: '', relatedClass: '', relatedMember: '' };
+    expect(buildChatPromptOptions(WORKSPACES, [THIRD_WORKSPACE_URI], [SECOND_WORKSPACE_URI], 'mock-project')).toEqual({ cwd: 'C:/work/two', workFolders: ['C:/work/three'], ...promptDefaults });
+    expect(buildChatPromptOptions(WORKSPACES, [], [SECOND_WORKSPACE_URI, FIRST_WORKSPACE_URI], 'mock-project')).toEqual({ cwd: 'C:/work/one', workFolders: ['C:/work/two'], ...promptDefaults });
+    expect(buildChatPromptOptions(WORKSPACES, [THIRD_WORKSPACE_URI, SECOND_WORKSPACE_URI], [], 'mock-project')).toEqual({ cwd: 'C:/work/two', workFolders: ['C:/work/three'], ...promptDefaults });
+    expect(buildChatPromptOptions(WORKSPACES, [], [], 'mock-project')).toEqual({
       cwd: 'C:/work/one',
       workFolders: ['C:/work/two', 'C:/work/three'],
+      ...promptDefaults,
     });
   });
 }

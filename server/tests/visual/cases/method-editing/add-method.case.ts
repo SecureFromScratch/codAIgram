@@ -30,11 +30,11 @@ export function registerAddMethodCase(): void {
       ),
     );
     await waitForMethodNames("ClassDiagram", [
-      "addClass",
-      "addPartialClass",
-      "connectClasses",
-      "recalcLayout",
-      "archive",
+      "addClass()",
+      "addPartialClass()",
+      "connectClasses()",
+      "recalcLayout()",
+      "archive()",
     ]);
   });
 }

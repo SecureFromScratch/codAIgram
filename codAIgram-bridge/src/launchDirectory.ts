@@ -4,8 +4,7 @@ import { resolveWorkspaceFolderRoots, resolveWorkspaceRoot } from "./workspaceRo
 import type { WorkingDirectoryErrorT } from "./workingDirectory";
 import { validateWorkingDirectory } from "./workingDirectory";
 import * as vscode from "vscode";
-
-type WorkspaceFoldersT = typeof vscode.workspace.workspaceFolders;
+import type { WorkspaceFoldersT } from "./workspaceFolders";
 
 export type LaunchDirectoryErrorT = WorkspaceRootErrorT | WorkingDirectoryErrorT;
 

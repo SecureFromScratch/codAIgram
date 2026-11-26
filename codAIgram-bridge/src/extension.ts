@@ -13,6 +13,7 @@ import type { WorkspaceFolderInfo, WorkspaceSyncRequest } from "@codaigram/bridg
 import { err, ok } from "neverthrow";
 import type { Result } from "neverthrow";
 import { CodexRuntime } from "./codexRuntime";
+import { AskAboutPromptGenerator } from "./askAboutPrompt";
 import type { CodexPromptOptions, CodexRuntimeErrorT } from "./codexRuntime";
 import type { CodexNotification } from "./codexRpc";
 import { getTypeCodes, scanForClasses, scanForTests } from "@codaigram/scan-shared";
@@ -50,6 +51,13 @@ export function configuredAgentsForWorkspaceFolder(folder: Pick<vscode.Workspace
     return agents;
 }
 
+function bundledCodexSearchDirectories(): readonly string[] {
+    if (process.platform !== "win32" || process.arch !== "x64") return [];
+    const openAiExtension: vscode.Extension<unknown> | undefined = vscode.extensions.getExtension("openai.chatgpt");
+    if (!openAiExtension) return [];
+    return [path.join(openAiExtension.extensionPath, "bin", "windows-x86_64")];
+}
+
 function currentWorkspaceFolders(): readonly WorkspaceFolderInfo[] {
     const configured: readonly vscode.WorkspaceFolder[] | undefined = vscode.workspace.workspaceFolders;
     const folders: readonly vscode.WorkspaceFolder[] = configured ? configured : [];
@@ -78,7 +86,9 @@ export interface CodAIgramBridgeApi {
 let codexRuntime: CodexRuntime | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<CodAIgramBridgeApi> {
-    const activeCodexRuntime: CodexRuntime = new CodexRuntime();
+    const codexFallbackSearchDirectories: readonly string[] = bundledCodexSearchDirectories();
+    const activeCodexRuntime: CodexRuntime = new CodexRuntime(codexFallbackSearchDirectories);
+    const askAboutPromptGenerator: AskAboutPromptGenerator = new AskAboutPromptGenerator(context.extensionPath);
     codexRuntime = activeCodexRuntime;
     let token: string = randomBytes(32).toString("base64url");
     let tokenState: TokenStateT = "available";
@@ -158,12 +168,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
     }));
 
     const httpServer: http.Server<HttpIncomingMessageT, HttpServerResponseT> = http.createServer((request, response) => {
+        const httpArguments: object = {
+          method: request.method,
+          url: request.url,
+          host: request.headers.host,
+          origin: request.headers.origin,
+          remoteAddress: request.socket.remoteAddress
+        };
+        logInfo("http.request.enter", httpArguments);
         if (request.method !== "GET") {
+            logFailure("http.request", "method_not_allowed", { arguments: httpArguments });
             response.writeHead(405);
             response.end("Method Not Allowed");
             return;
         }
 
+        logFailure("http.request", "route_not_found", { arguments: httpArguments });
         response.writeHead(404);
         response.end("Not Found");
     });
@@ -175,6 +195,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
         sessionIdByClient.delete(client);
         const pendingEditorWaits: PendingEditorWaits = new PendingEditorWaits((id) => {
             if (client.readyState === WebSocket.OPEN) {
+                logFailure("websocket.api", "request_timeout", {
+                  requestId: id,
+                  requestType: "wait_for_active_editor_change"
+                });
                 client.send(JSON.stringify({ version: 1, type: "error", id, code: "request_timeout" }));
             }
         }, scheduleEditorWaitTimeout);
@@ -220,16 +244,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
             if (output.isOk()) output.value.appendLine("CodAIgram Bridge WebSocket client disconnected.");
         });
         client.on("error", (error) => {
-            if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket client error: ${error.message}`);
+            logException("websocket.client", error, { clientReadyState: client.readyState });
         });
         let messageQueue: Promise<void> = Promise.resolve();
         client.on("message", (data, isBinary) => {
-            if (isBinary) return;
+            if (isBinary) {
+                logFailure("websocket.request", "binary-request-not-supported", { isBinary, byteLength: data.toString().length });
+                return;
+            }
             const message: string = data.toString();
+            logInfo("websocket.request.enter", { arguments: message });
             messageQueue = messageQueue.then(() => validateWorkspaceRequest(message)).then((result) => {
+                if (result.isErr()) {
+                    logFailure("websocket.request.validate", result.error, { arguments: message });
+                }
                 if (result.isOk() && client.readyState === WebSocket.OPEN) {
                     const request: WorkspaceSyncRequest = result.value;
+                    logInfo("websocket.api.enter", { type: request.type, id: request.id, arguments: request });
                     if (pendingEditorWaits.has(request.id)) {
+                        logFailure("websocket.api", "duplicate-pending-request-id", { arguments: request });
                         pendingEditorWaits.clear();
                         client.close(1008);
                     } else if (request.type === "ping") {
@@ -251,8 +284,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                           result: scanResult
                         }));
                     } else if (request.type === "code/get" && typeof request.projectName === "string" && Array.isArray(request.workFolders) && typeof request.filepath === "string" && typeof request.typeName === "string") {
-                        const matchingCode: readonly string[] = getTypeCodes(request.workFolders, request.filepath, request.typeName);
+                        const matchingCode: readonly string[] = getTypeCodes(request.workFolders, request.filepath, request.typeName, request.projectName);
                         if (matchingCode.length === 0) {
+                            logFailure("websocket.api", "code_not_found", { arguments: request });
                             client.send(JSON.stringify({
                               version: 1,
                               type: "error",
@@ -270,6 +304,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                             }));
                         }
                     } else if (isChatPromptRequest(request) && request.syncTimestamp !== workspaceSync.currentTimestamp()) {
+                        logFailure("websocket.api", "workspace_sync_required", {
+                          arguments: request,
+                          currentSyncTimestamp: workspaceSync.currentTimestamp()
+                        });
                         client.send(JSON.stringify({
                           version: 1,
                           type: "error",
@@ -282,7 +320,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                         const state: ClientState | undefined = clients.get(client);
                         if (state) {
                             state.pendingChats.add(request.id);
-                            void handlePrompt(client, state, request.id, request.prompt, activeCodexRuntime, { cwd: request.cwd, workFolders: request.workFolders });
+                            const codexPrompt: string = askAboutPromptGenerator.generate(request.projectName, request, request.prompt);
+                            void handlePrompt(client, state, request.id, codexPrompt, activeCodexRuntime, { cwd: request.cwd, workFolders: request.workFolders });
                         }
                     } else if (request.type === "cancel" && typeof request.targetId === "string") {
                         const targetId: string = request.targetId;
@@ -310,6 +349,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                                     client.send(JSON.stringify(cancelledMessage));
                                     client.send(JSON.stringify(completedMessage));
                                 } else {
+                                    logFailure("websocket.api", "request_not_pending", {
+                                      arguments: request,
+                                      targetRequestId: targetId,
+                                      runtimeError: cancelled.error
+                                    });
                                     const failedCancellation: object = {
                                       version: 1,
                                       type: "error",
@@ -320,6 +364,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                                 }
                             });
                         } else {
+                            logFailure("websocket.api", "request_not_pending", { arguments: request, targetRequestId: targetId });
                             client.send(JSON.stringify({
                               version: 1,
                               type: "error",
@@ -329,6 +374,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                         }
                     } else if (request.type === "wait_for_active_editor_change") {
                         if (pendingEditorWaits.size >= 32) {
+                            logFailure("websocket.api", "too_many_pending_requests", {
+                              arguments: request,
+                              pendingCount: pendingEditorWaits.size
+                            });
                             client.send(JSON.stringify({
                               version: 1,
                               type: "error",
@@ -339,6 +388,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                             pendingEditorWaits.add(request.id);
                         }
                     } else {
+                        logFailure("websocket.api", "unsupported_request", { arguments: request });
                         client.send(JSON.stringify({
                           version: 1,
                           type: "error",
@@ -347,18 +397,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodAIg
                         }));
                     }
                 }
-            }).then(() => {}, (error: unknown) => logWarning(error));
+            }).then(() => {}, (error: unknown) => logException("websocket.request", error, { arguments: message }));
         });
         client.send(JSON.stringify({ version: 1, type: "welcome" }));
         if (sessionId) client.send(JSON.stringify({ version: 1, type: "session", sessionId }));
     });
     wsServer.on("error", (error) => {
-        if (output.isOk()) output.value.appendLine(`CodAIgram Bridge WebSocket server error: ${error.message}`);
+        logException("websocket.server", error, {});
     });
     httpServer.on("upgrade", (request, socket, head) => {
+        logInfo("websocket.handshake.enter", {
+          method: request.method,
+          attemptedPath: redactCredentialPath(request.url ?? "/"),
+          host: request.headers.host ?? "<missing>",
+          origin: request.headers.origin ?? "<missing>",
+          remoteAddress: request.socket.remoteAddress ?? "<missing>",
+          remotePort: request.socket.remotePort ?? "<missing>"
+        });
         type CredentialRouteT = "nonce" | "sessionid" | "unknown";
         const rejectUnauthorized: (reason: string, route: CredentialRouteT) => void = (reason, route) => {
-            if (output.isOk()) output.value.appendLine(`FAILED WebSocket connection rejected; route=${route}; reason=${reason}.`);
+            logFailure("websocket.handshake", reason, {
+              route,
+              method: request.method,
+              attemptedPath: redactCredentialPath(request.url ?? "/"),
+              host: request.headers.host ?? "<missing>",
+              origin: request.headers.origin ?? "<missing>",
+              remoteAddress: request.socket.remoteAddress ?? "<missing>",
+              remotePort: request.socket.remotePort ?? "<missing>"
+            });
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
             socket.destroy();
         };
@@ -540,12 +606,42 @@ function isAllowedOrigin(suppliedOrigin: string, trustedOrigins: readonly string
 }
 
 function logWarning(error: unknown): void {
-    if (output.isOk()) {
-        output.value.appendLine(error instanceof Error ? "CodAIgram Bridge operation failed with an error." : "CodAIgram Bridge operation failed with a non-error value.");
+    logException("bridge.operation", error, {});
+}
+
+function logInfo(event: string, details: unknown): void {
+    if (output.isOk()) output.value.appendLine(`[${new Date().toISOString()}] ${event} ${formatLogDetails(details)}`);
+}
+
+function logFailure(event: string, reason: string, details: unknown): void {
+    if (output.isOk()) output.value.appendLine(`[${new Date().toISOString()}] FAILED ${event}; reason=${reason}; details=${formatLogDetails(details)}`);
+}
+
+function logException(event: string, error: unknown, details: unknown): void {
+    if (error instanceof Error) {
+        logFailure(event, "exception", {
+          details,
+          exceptionName: error.name,
+          exceptionMessage: error.message,
+          exceptionStack: error.stack
+        });
+    } else {
+        logFailure(event, "exception", { details, thrownValue: error });
+    }
+}
+
+function formatLogDetails(value: unknown): string {
+    try {
+        return JSON.stringify(value) ?? String(value);
+    } catch (error: unknown) {
+        console.warn("CodAIgram Bridge log serialization failed.", error);
+        return `Unable to serialize log details: ${error instanceof Error ? error.message : String(error)}`;
     }
 }
 
 async function handlePrompt(client: WebSocket, state: ClientState, id: string, prompt: string, runtime: CodexRuntime, options: CodexPromptOptions = {}): Promise<void> {
+    const callArguments: object = { id, prompt, options };
+    logInfo("codex.ask.enter", callArguments);
     const onDelta: (delta: string) => void = (delta) => {
         const message: object = { version: 1, type: "chat_delta", id, delta };
         if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(message));
@@ -559,7 +655,9 @@ async function handlePrompt(client: WebSocket, state: ClientState, id: string, p
           data: notification.params
         }));
     };
-    let response: Result<string, CodexRuntimeErrorT> = await runtime.ask(prompt, onDelta, onEvent, options);
+    let response: Result<string, CodexRuntimeErrorT>;
+    try {
+    response = await runtime.ask(prompt, onDelta, onEvent, options);
     if (response.isErr() && response.error === "not_running") {
         const started: Result<void, CodexRuntimeErrorT> = await runtime.start({
           name: "codaigram_bridge",
@@ -583,6 +681,7 @@ async function handlePrompt(client: WebSocket, state: ClientState, id: string, p
           response: response.value
         }));
     } else {
+        logFailure("codex.ask", response.error, { arguments: callArguments });
         if (output.isOk()) logChatRequestFailure(id, response.error);
         client.send(JSON.stringify({
           version: 1,
@@ -592,6 +691,24 @@ async function handlePrompt(client: WebSocket, state: ClientState, id: string, p
           cause: response.error
         }));
     }
+    } catch (error: unknown) {
+        console.error("CodAIgram Bridge Codex request threw an exception.", error);
+        logException("codex.ask", error, { arguments: callArguments });
+        state.pendingChats.delete(id);
+        if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({
+          version: 1,
+          type: "error",
+          id,
+          code: "codex_request_failed",
+          cause: "exception"
+        }));
+    }
+}
+
+function redactCredentialPath(requestPath: string): string {
+    if (requestPath.startsWith("/session/")) return "/session/<redacted>";
+    if (requestPath === "/" || requestPath.startsWith("/?")) return requestPath;
+    return "/<redacted>";
 }
 
 function logChatRequestFailure(requestId: string, errorCode: CodexRuntimeErrorT): void {
@@ -601,6 +718,10 @@ function logChatRequestFailure(requestId: string, errorCode: CodexRuntimeErrorT)
     const timestamp: string = new Date().toISOString();
     const reason: string = describeChatFailure(errorCode, workspaceFolders.length);
     output.value.appendLine(`[${timestamp}] CodAIgram Bridge chat request failed; requestId=${requestId}; code=${errorCode}; reason=${reason}; workspaceFolders=${JSON.stringify(workspaceDetails)}`);
+    if (errorCode === "not_found" || errorCode === "invalid_path") {
+        const fallbackDirectories: readonly string[] = bundledCodexSearchDirectories();
+        output.value.appendLine(`[${timestamp}] Codex executable discovery details; error=${errorCode}; platform=${process.platform}; PATH=${JSON.stringify(process.env.PATH ?? "<missing>")}; PATHEXT=${JSON.stringify(process.env.PATHEXT ?? "<missing>")}; fallbackSearchDirectories=${JSON.stringify(fallbackDirectories)}; searchedNames=codex${process.platform === "win32" ? ".EXE,.COM,.CMD,.BAT" : ""}`);
+    }
 }
 
 interface WorkspaceLogDetails {
@@ -609,6 +730,8 @@ interface WorkspaceLogDetails {
 }
 
 function describeChatFailure(errorCode: CodexRuntimeErrorT, workspaceCount: number): string {
+    if (errorCode === "not_found") return "No codex executable was found in the VS Code extension host PATH or the bundled OpenAI VS Code extension; see discovery details for searched locations";
+    if (errorCode === "invalid_path") return "The VS Code extension host PATH contains no valid absolute directories for Codex executable discovery";
     if (errorCode === "ambiguous_workspace") return `Codex needs exactly one workspace folder, but VS Code has ${workspaceCount}`;
     if (errorCode === "no_workspace") return "Codex needs exactly one workspace folder, but VS Code has none";
     if (errorCode === "unsupported_workspace_uri") return "Codex needs a local file-backed workspace folder";

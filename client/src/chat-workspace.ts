@@ -5,6 +5,7 @@ export function buildChatPromptOptions(
   workspaces: readonly WorkspaceFolder[],
   selectedWorkspaceUris: readonly string[],
   selectedAgentUris: readonly string[],
+  projectName: string,
 ): Required<PromptOptions> {
   const selectedWorkspaces: readonly WorkspaceFolder[] = workspaces.filter((workspace: WorkspaceFolder) =>
     selectedWorkspaceUris.includes(workspace.uri) || selectedAgentUris.includes(workspace.uri),
@@ -20,7 +21,7 @@ export function buildChatPromptOptions(
   const workFolders: readonly string[] = activeWorkspaces
     .map((workspace: WorkspaceFolder) => workspaceUriToPath(workspace.uri))
     .filter((folderPath: string) => folderPath !== cwd);
-  return { cwd, workFolders };
+  return { cwd, workFolders, projectName, relatedFile: '', relatedClass: '', relatedMember: '' };
 }
 
 function workspaceUriToPath(uri: string): string {

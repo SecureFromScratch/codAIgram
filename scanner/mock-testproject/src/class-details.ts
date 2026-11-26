@@ -9,6 +9,7 @@ export interface ClassDetails {
   relations: {
     kind: 'OWNS' | 'REF' | 'UNK';
     name: string;
+    member?: string;
     target: string;
     // UNTRUST-ALLOW-BOOLEAN: The existing class-details contract encodes relation multiplicity as a boolean; its established wire shape must be retained.
     many: boolean }[];

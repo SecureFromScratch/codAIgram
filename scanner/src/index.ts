@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import ts from 'typescript';
-import type { ClassDetails, ClassMember as ClassMemberT, CompositeTypeT, FieldType as FieldTypeT } from '@codaigram/shared/class-types';
+import type { ArgsListT, ClassDetails, ClassMember as ClassMemberT, CompositeTypeT, FieldType as FieldTypeT } from '@codaigram/shared/class-types';
 import { JsonMap } from '@codaigram/shared/json-map';
 import type { ScannedClassT as ClassDetailsT, ScannedUnknownRelationT as RelationT, StoredScannedClassT as StoredClassT } from '@codaigram/shared/model/class';
 import type { PromptHistoryEntryT, ScannedTestCaseT as TestCaseT, TestScanResultT as ScanResultT } from '@codaigram/shared/model/test';
@@ -18,6 +18,7 @@ type CliArgumentsT = {
   readonly rootPaths: readonly string[];
   readonly projectName: string;
   readonly fileTypes: readonly FileType[];
+  readonly slowtrace: boolean;
   readonly serverUrl?: string;
 };
 
@@ -28,7 +29,7 @@ const PROJECT_NAME_PATTERN: RegExp = /^[A-Za-z][A-Za-z0-9_-]{0,99}$/u;
 const IGNORED_DIRECTORY_NAMES: ReadonlySet<string> = new Set<string>(['.git', 'coverage', 'dist', 'dist-tests', 'dist-types', 'node_modules', 'test-dist']);
 
 function parseArguments(argumentsList: readonly string[]): CliArgumentsT {
-  if (argumentsList.length < 2) logAndThrow(new Error('Usage: scanner <project-name> <folder[,folder...]> --types <test|class|test,class> [--server-url <url>]'));
+  if (argumentsList.length < 2) logAndThrow(new Error('Usage: scanner <project-name> <folder[,folder...]> --types <test|class|test,class> [--server-url <url>] [--slowtrace]'));
   const projectName: string | undefined = argumentsList[0];
   const rootArgument: string | undefined = argumentsList[1];
   if (!rootArgument || !projectName) return logAndThrow(new Error('Usage: scanner <project-name> <folder[,folder...]> --types <test|class|test,class> [--server-url <url>]'));
@@ -46,11 +47,12 @@ function parseArguments(argumentsList: readonly string[]): CliArgumentsT {
   const typeNames: readonly string[] = typeValue?.split(',').map((item: string) => item.trim()) ?? [];
   if (typeNames.length === 0 || typeNames.some((item: string) => item !== FileType.Test && item !== FileType.Class)) logAndThrow(new Error('--types must be test, class, or a comma-separated combination such as test,class.'));
   const fileTypes: readonly FileType[] = typeNames.map((item: string) => item === FileType.Test ? FileType.Test : FileType.Class);
-  if (serverUrlOptionIndex === -1) return { rootPaths, projectName, fileTypes };
+  const slowtrace: boolean = argumentsList.includes('--slowtrace');
+  if (serverUrlOptionIndex === -1) return { rootPaths, projectName, fileTypes, slowtrace };
   const serverUrl: string | undefined = argumentsList[serverUrlOptionIndex + 1];
   if (!serverUrl) return logAndThrow(new Error('--server-url requires a URL.'));
   new URL(serverUrl);
-  return { rootPaths, projectName, fileTypes, serverUrl };
+  return { rootPaths, projectName, fileTypes, serverUrl, slowtrace };
 }
 
 function isInsideDirectory(candidate: string, parent: string): boolean {
@@ -371,12 +373,21 @@ function scanMember(member: ts.ClassElement | ts.TypeElement, members: Map<strin
   if (ts.isMethodDeclaration(member) || ts.isMethodSignature(member)) {
     const name: string | undefined = memberName(member);
     if (!name) return;
-    const argumentsList: FieldTypeT[] = [];
+    const argumentsList: FieldTypeT[] = [{ arg: '+RET', t: compositeType(member.type) }];
     member.parameters.forEach((parameter: ts.ParameterDeclaration) => {
       const argumentName: string | undefined = memberName(parameter);
       if (argumentName) argumentsList.push({ arg: argumentName, t: compositeType(parameter.type) });
     });
     appendMember(members, name, argumentsList);
+    return;
+  }
+  if (ts.isCallSignatureDeclaration(member)) {
+    const argumentsList: FieldTypeT[] = [{ arg: '+RET', t: compositeType(member.type) }];
+    member.parameters.forEach((parameter: ts.ParameterDeclaration) => {
+      const argumentName: string | undefined = memberName(parameter);
+      if (argumentName) argumentsList.push({ arg: argumentName, t: compositeType(parameter.type) });
+    });
+    appendMember(members, '', argumentsList);
     return;
   }
   if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
@@ -405,7 +416,7 @@ function relationFor(member: ts.PropertyDeclaration | ts.PropertySignature): Rel
       // UNTRUST-ALLOW-NULLISH: An array whose element type has no simple identifier cannot be represented as a relationship target in the provisional scanner model, so this scanner intentionally omits that property.
       return undefined;
     }
-    return { kind: 'UNK', name, target, many: true };
+    return relationDetails(member, name, target, true);
   }
   // UNTRUST-ALLOW-NULLISH: Primitive, union, intersection, and other non-reference property types have no named declaration target in the provisional scanner model, so the scanner intentionally omits that property.
   if (!ts.isTypeReferenceNode(member.type)) return undefined;
@@ -421,9 +432,14 @@ function relationFor(member: ts.PropertyDeclaration | ts.PropertySignature): Rel
       // UNTRUST-ALLOW-NULLISH: A generic holding container with a non-identifier element type cannot produce a stable relationship target in the provisional scanner model, so this scanner intentionally omits that property.
       return undefined;
     }
-    return { kind: 'UNK', name, target: containedTarget, many: true };
+    return relationDetails(member, name, containedTarget, true);
   }
-  return { kind: 'UNK', name, target, many: false };
+  return relationDetails(member, name, target, false);
+}
+
+function relationDetails(member: ts.PropertyDeclaration | ts.PropertySignature, name: string, target: string, many: boolean): RelationT {
+  if (!isPublicMember(member)) return { kind: 'UNK', name, member: name, target, many };
+  return { kind: 'UNK', name, target, many };
 }
 
 function classDetailsFor(declaration: ts.ClassDeclaration | ts.InterfaceDeclaration): ClassDetailsT | undefined {
@@ -446,6 +462,33 @@ function classDetailsFor(declaration: ts.ClassDeclaration | ts.InterfaceDeclarat
     name,
     methods: Array.from(memberOverloads.entries(), ([name, overloads]: [string, FieldTypeT[][]]) => ({ name, overloads })),
     relations };
+}
+
+function typeAliasDetailsFor(declaration: ts.TypeAliasDeclaration): ClassDetailsT {
+  if (!ts.isFunctionTypeNode(declaration.type)) {
+    return {
+      declaration: 'TYPE_ALIAS',
+      name: declaration.name.text,
+      state: ts.isUnionTypeNode(declaration.type) ? 'union' : 'alias',
+      aliasType: compositeType(declaration.type),
+      methods: [],
+      relations: [],
+    };
+  }
+  const args: FieldTypeT[] = declaration.type.parameters.flatMap((parameter: ts.ParameterDeclaration) => {
+    const name: string | undefined = memberName(parameter);
+    return name ? [{ arg: name, t: compositeType(parameter.type) }] : [];
+  });
+  return {
+    declaration: 'TYPE_ALIAS',
+    name: declaration.name.text,
+    state: 'delegate',
+    methods: [{
+      name: '',
+      overloads: [[{ arg: '+RET', t: compositeType(declaration.type.type) }, ...args]],
+    }],
+    relations: [],
+  };
 }
 
 function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
@@ -495,8 +538,8 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
     const sourceFile: ts.SourceFile | undefined = program.getSourceFile(filePath);
     if (!sourceFile) return;
     sourceFile.forEachChild((node: ts.Node) => {
-      if (!ts.isClassDeclaration(node) && !ts.isInterfaceDeclaration(node)) return;
-      const detail: ClassDetailsT | undefined = classDetailsFor(node);
+      if (!ts.isClassDeclaration(node) && !ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node)) return;
+      const detail: ClassDetailsT | undefined = ts.isTypeAliasDeclaration(node) ? typeAliasDetailsFor(node) : classDetailsFor(node);
       if (detail) {
         if (exceptionDeclarations.has(node) || ts.isClassDeclaration(node) && extendsError(checker.getTypeAtLocation(node), new Set<ts.Type>())) detail.usage = 'ex';
         const root: string = rootPaths.find((candidate: string) => !path.relative(candidate, filePath).startsWith('..')) ?? rootPaths[0]!;
@@ -506,10 +549,19 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
       }
     });
   });
-  const uniqueNames: Set<string> = new Set<string>();
+  const declarationsByName: Map<string, ClassDetailsT[]> = new Map<string, ClassDetailsT[]>();
   details.forEach((detail: ClassDetailsT) => {
-    if (uniqueNames.has(detail.name)) logAndThrow(new Error(`Class scan found duplicate declaration ${detail.name}.`));
-    uniqueNames.add(detail.name);
+    const declarations: ClassDetailsT[] = declarationsByName.get(detail.name) ?? [];
+    declarations.push(detail);
+    declarationsByName.set(detail.name, declarations);
+  });
+  declarationsByName.forEach((declarations: ClassDetailsT[], name: string) => {
+    if (declarations.length > 1) {
+      const files: string[] = [...new Set(declarations
+        .map((declaration: ClassDetailsT) => declaration.sourceFile)
+        .filter((sourceFile: string | undefined): sourceFile is string => sourceFile !== undefined))];
+      logAndThrow(new Error(`Class scan found duplicate declaration ${name} in files: ${files.join(', ')}.`));
+    }
   });
   if (details.length === 0) {
     logAndThrow(new Error(`Class scan found no class or interface declarations in the scanned source files under: ${rootPaths.join(', ')}. Verify the scan folders and source filters.`));
@@ -518,6 +570,8 @@ function scanClasses(rootPaths: readonly string[]): readonly ClassDetailsT[] {
 }
 
 function isClassSource(filePath: string, knownFiles: ReadonlySet<string>): boolean {
+  const pathSegments: string[] = filePath.split(/[\\/]/u);
+  if (!pathSegments.includes('src') || pathSegments.some((segment: string) => /^(?:test|tests|__tests__)$/iu.test(segment))) return false;
   if (!SOURCE_FILE_PATTERN.test(filePath) || /\.d\.[cm]?ts$/u.test(filePath)) return false;
   if (/\.js$/u.test(filePath) && knownFiles.has(filePath.replace(/\.js$/u, '.ts'))) return false;
   if (/\.jsx$/u.test(filePath) && knownFiles.has(filePath.replace(/\.jsx$/u, '.tsx'))) return false;
@@ -549,6 +603,10 @@ function sourceFilesFor(rootPaths: readonly string[]): ReadonlySet<string> {
 }
 
 type UploadClassT = Omit<ClassDetailsT, 'declaration'>;
+type UploadMemberT = {
+  name: string;
+  overloads: { args: ArgsListT }[];
+};
 
 async function deletedClassesForRemovedDeclarations(projectName: string, classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<UploadClassT[]> {
   const response: Response = await loggedFetch(new URL(`/api/${projectName}/getClasses`, serverUrl));
@@ -576,48 +634,92 @@ async function deletedClassesForRemovedDeclarations(projectName: string, classes
     }));
 }
 
-async function uploadClasses(projectName: string, classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string): Promise<void> {
+async function uploadClasses(projectName: string, classes: readonly ClassDetailsT[], rootPaths: readonly string[], serverUrl: string, slowtrace: boolean): Promise<void> {
   const deleted: UploadClassT[] = await deletedClassesForRemovedDeclarations(projectName, classes, rootPaths, serverUrl);
   const updates: readonly UploadClassT[] = [...classes, ...deleted];
   log('INFO', `Uploading ${updates.length} class declarations (${deleted.length} deleted from removed source files)`);
-  const payload: string = JSON.stringify({
-    origin: {
-      kind: 'scan',
-      name: os.userInfo().username,
-      version: new Date().toISOString(),
-    },
-    classes: updates.map((detail: UploadClassT) => ({
-      name: detail.name,
-      usage: detail.usage,
-      sourceFile: detail.sourceFile,
-      modifiedAt: detail.modifiedAt,
-      methods: detail.methods.map((member: ClassMemberT) => ({
+  if (updates.length === 0) {
+    log('INFO', 'No class declarations to upload');
+    return;
+  }
+  const origin = {
+    kind: 'scan',
+    name: os.userInfo().username,
+    version: new Date().toISOString(),
+  };
+  const uploadClass: (detail: UploadClassT) => Record<string, unknown> = (detail: UploadClassT) => ({
+    name: detail.name,
+    usage: detail.usage,
+    sourceFile: detail.sourceFile,
+    modifiedAt: detail.modifiedAt,
+    methods: detail.methods.map((member: ClassMemberT) => {
+      const result: UploadMemberT = {
         name: member.name,
         overloads: member.overloads.map((args) => ({ args })),
-      })),
-      relations: detail.relations,
-      state: detail.state,
-    })),
+      };
+      return result;
+    }),
+    relations: detail.relations,
+    state: detail.state,
+    aliasType: detail.aliasType,
   });
-  const response: Response = await loggedFetch(new URL(`/api/${projectName}/updateClasses`, serverUrl), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: payload }, payload);
-  if (!response.ok) logAndThrow(new Error(`Class upload failed with HTTP ${String(response.status)}.`));
-  log('INFO', `Class upload completed with HTTP ${String(response.status)}`);
+  const endpoint: URL = new URL(`/api/${projectName}/updateClasses`, serverUrl);
+  const upload = async (batch: readonly UploadClassT[]): Promise<void> => {
+    const payload: string = JSON.stringify({
+    origin: {
+      ...origin,
+    },
+      classes: batch.map(uploadClass),
+    });
+    const response: Response = await loggedFetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload }, payload);
+    const responseBody: string = await response.text();
+    if (!response.ok) {
+      if (slowtrace) {
+        const diagnostic = JSON.stringify({
+          projectName,
+          endpoint: endpoint.toString(),
+          class: batch[0],
+          uploadedClass: batch.length === 1 ? uploadClass(batch[0]!) : undefined,
+          requestPayload: JSON.parse(payload) as unknown,
+          responseStatus: response.status,
+          responseBody,
+        }, null, 2);
+        console.error(`SLOWTRACE class upload failure:\n${diagnostic}`);
+        log('ERROR', `SLOWTRACE class upload failure:\n${diagnostic}`);
+      }
+      logAndThrow(new Error(`Class upload failed with HTTP ${String(response.status)}. Server response: ${responseBody || '[empty response body]'}`));
+    }
+    log('INFO', `Class upload completed with HTTP ${String(response.status)}`);
+  };
+  if (slowtrace) {
+    log('INFO', 'Slowtrace enabled: uploading one class declaration per request');
+    for (const item of updates) await upload([item]);
+    return;
+  }
+  await upload(updates);
 }
 
 function printClassDetails(detail: ClassDetailsT): void {
   console.log(`${detail.declaration} ${detail.name}`);
+  if (detail.state) console.log(`  STATE ${detail.state}`);
   detail.methods.forEach((member: ClassMemberT) => {
-    const marker: FieldTypeT | undefined = member.overloads.at(0)?.at(0);
-    if (marker?.arg === '+RO' || marker?.arg === '+RW') {
-      console.log(`  FIELD ${member.name} ${marker.arg}: ${typeToText(marker.t)}`);
-    } else if (marker?.arg === '+GET' || marker?.arg === '+SET' || marker?.arg === '+PROP') {
-      console.log(`  ACCESSOR ${member.name} ${marker.arg}: ${typeToText(marker.t)}`);
-    } else {
-      member.overloads.forEach((args: FieldTypeT[]) => { console.log(`  METHOD ${member.name}(${args.map((field: FieldTypeT) => `${field.arg}: ${typeToText(field.t)}`).join(', ')})`); });
-    }
+    member.overloads.forEach((args: FieldTypeT[]) => {
+      const marker: FieldTypeT | undefined = args.at(0);
+      if (marker?.arg === '+RO' || marker?.arg === '+RW') {
+        console.log(`  FIELD ${member.name} ${marker.arg}: ${typeToText(marker.t)}`);
+      } else if (marker?.arg === '+GET' || marker?.arg === '+SET' || marker?.arg === '+PROP') {
+        console.log(`  ACCESSOR ${member.name} ${marker.arg}: ${typeToText(marker.t)}`);
+      } else {
+        const returnType: FieldTypeT | undefined = marker?.arg === '+RET' ? marker : undefined;
+        const parameters: FieldTypeT[] = returnType ? args.slice(1) : args;
+        const label: string = detail.state === 'delegate' ? 'DELEGATE' : member.name ? 'METHOD' : 'CALLABLE';
+        const signature: string = `  ${label} ${member.name}(${parameters.map((field: FieldTypeT) => `${field.arg}: ${typeToText(field.t)}`).join(', ')})`;
+        console.log(returnType ? `${signature} => ${typeToText(returnType.t)}` : signature);
+      }
+    });
   });
   detail.relations.forEach((relation: ClassDetails['relations'][number]) => {
     console.log(`  RELATION ${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`);
@@ -659,7 +761,7 @@ async function run(): Promise<void> {
     const classes: readonly ClassDetailsT[] = scanClasses(argumentsValue.rootPaths);
     log('INFO', `Class scan completed: ${classes.length} declarations`);
     classes.forEach(printClassDetails);
-    if (argumentsValue.serverUrl) await uploadClasses(argumentsValue.projectName, classes, argumentsValue.rootPaths, argumentsValue.serverUrl);
+    if (argumentsValue.serverUrl) await uploadClasses(argumentsValue.projectName, classes, argumentsValue.rootPaths, argumentsValue.serverUrl, argumentsValue.slowtrace);
   }
 }
 

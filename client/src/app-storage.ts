@@ -1,4 +1,4 @@
-export type AppStorageKeyT = "editorPercent" | "vscodeBridgeWorkspaceUris" | "vscodeBridgeSession";
+export type AppStorageKeyT = "editorPercent" | "selectedProject" | "vscodeBridgeWorkspaceUris" | "vscodeBridgeSession";
 export type AppStorageReadT = { state: "missing"; } | { state: "present"; value: string; };
 type BrowserStorageReadT = ReturnType<Storage["getItem"]>;
 

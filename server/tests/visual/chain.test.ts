@@ -7,6 +7,8 @@ import { registerEditorMemberContextMenuAskAboutCase } from './cases/visibility/
 import { registerAskAboutMemberHeaderCase } from './cases/chat/ask-about-member-header.case.js';
 import { registerClassNameContextMenuActualCodeCase } from './cases/visibility/class-name-context-menu-actual-code.case.js';
 import { registerClassNameContextMenuToggleActualCodeCase } from './cases/visibility/class-name-context-menu-toggle-actual-code.case.js';
+import { registerActualCodeNoExtraLinesCase } from './cases/tooltip/actual-code-no-extra-lines.case.js';
+import { registerActualCodeScrollCases } from './cases/tooltip/actual-code-scroll.case.js';
 
 registerVisualLifecycle();
 registerShowChainIncomingOnlyCase();
@@ -17,3 +19,5 @@ registerEditorMemberContextMenuAskAboutCase();
 registerAskAboutMemberHeaderCase();
 registerClassNameContextMenuActualCodeCase();
 registerClassNameContextMenuToggleActualCodeCase();
+registerActualCodeNoExtraLinesCase();
+registerActualCodeScrollCases();

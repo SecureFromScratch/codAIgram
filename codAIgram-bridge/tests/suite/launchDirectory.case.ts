@@ -7,8 +7,7 @@ import { resolveWorkspaceFolderRoots, resolveWorkspaceFolders } from "../../src/
 import { resolveLaunchDirectory, resolveLaunchDirectoryForFrom, resolveLaunchDirectoryFrom } from "../../src/launchDirectory";
 import type { Result } from "neverthrow";
 import type { WorkspaceRootErrorT } from "../../src/workspaceRoot";
-
-type WorkspaceFoldersT = typeof vscode.workspace.workspaceFolders;
+import type { WorkspaceFoldersT } from "../../src/workspaceFolders";
 
 export const TEST_CASE_METADATA: TestCaseMetadata = {
   title: "resolves an existing active workspace as the canonical launch directory",

@@ -30,6 +30,10 @@ export function registerCodexDiscoveryCase(): void {
             assert.deepStrictEqual((await discoverCodexInPath([first, second].join(path.delimiter), platform, ".EXE", probeExecutable))._unsafeUnwrap(), { path: executable, kind: "native" });
             assert.strictEqual((await discoverCodexInPath("relative::.", "posix", "", probeExecutable))._unsafeUnwrapErr(), "invalid_path");
             assert.strictEqual((await discoverCodexInPath(first, platform, ".EXE", probeExecutable))._unsafeUnwrapErr(), "not_found");
+            assert.deepStrictEqual(
+              (await discoverCodexInPath(first, platform, windows ? ".EXE" : "", probeExecutable, [second]))._unsafeUnwrap(),
+              { path: executable, kind: "native" }
+            );
             const orderedProbe: ExecutableProbeT = async (candidate) => candidate === executable;
             assert.deepStrictEqual((await discoverCodexInPath([first, second].join(path.delimiter), platform, ".EXE", orderedProbe))._unsafeUnwrap(), { path: executable, kind: "native" });
             if (!windows) {

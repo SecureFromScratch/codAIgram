@@ -1,6 +1,6 @@
 import { err, ok, Result } from "neverthrow";
-import { validateRequest } from "./pingValidation";
-import type { ValidatedRequest } from "./pingValidation";
+import { validateChatPromptRequest, validateRequest } from "./pingValidation.js";
+import type { ValidatedRequest } from "./pingValidation.js";
 
 export interface WorkspaceFolderInfo {
   readonly name: string;
@@ -13,8 +13,11 @@ export interface WorkspaceSyncRequest extends ValidatedRequest {
   readonly syncTimestamp?: number;
   readonly cwd?: string;
   readonly workFolders?: readonly string[];
-  readonly scanType?: "tests" | "classes";
   readonly projectName?: string;
+  readonly relatedFile?: string;
+  readonly relatedClass?: string;
+  readonly relatedMember?: string;
+  readonly scanType?: "tests" | "classes";
   readonly filepath?: string;
   readonly typeName?: string;
 }
@@ -37,6 +40,10 @@ export interface ChatPromptRequest extends WorkspaceSyncRequest {
   readonly prompt: string;
   readonly cwd: string;
   readonly workFolders: readonly string[];
+  readonly projectName: string;
+  readonly relatedFile: string;
+  readonly relatedClass: string;
+  readonly relatedMember: string;
 }
 
 export function isChatPromptRequest(request: WorkspaceSyncRequest): request is ChatPromptRequest {
@@ -44,7 +51,11 @@ export function isChatPromptRequest(request: WorkspaceSyncRequest): request is C
     typeof request.prompt === "string" &&
     typeof request.cwd === "string" &&
     Array.isArray(request.workFolders) &&
-    request.workFolders.every((folder: string) => typeof folder === "string");
+    request.workFolders.every((folder: string) => typeof folder === "string") &&
+    typeof request.projectName === "string" &&
+    typeof request.relatedFile === "string" &&
+    typeof request.relatedClass === "string" &&
+    typeof request.relatedMember === "string";
 }
 
 interface RawSyncRequest {
@@ -56,8 +67,11 @@ interface RawSyncRequest {
   readonly prompt?: unknown;
   readonly cwd?: unknown;
   readonly workFolders?: unknown;
-  readonly scanType?: unknown;
   readonly projectName?: unknown;
+  readonly relatedFile?: unknown;
+  readonly relatedClass?: unknown;
+  readonly relatedMember?: unknown;
+  readonly scanType?: unknown;
   readonly filepath?: unknown;
   readonly typeName?: unknown;
 }
@@ -90,7 +104,7 @@ export async function validateWorkspaceRequest(text: string): Promise<Result<Wor
   const isChat: boolean = raw.type === "chat" || raw.type === "chat/ask";
   const isScan: boolean = raw.type === "scan/tests" || raw.type === "scan/classes";
   const isCodeGet: boolean = raw.type === "code/get";
-  const allowed: readonly string[] = raw.type === "cancel" ? ["version", "type", "id", "targetId", "syncTimestamp"] : isChat ? ["version", "type", "id", "syncTimestamp", "prompt", "cwd", "workFolders"] : isScan ? ["version", "type", "id", "workFolders"] : isCodeGet ? ["version", "type", "id", "projectName", "workFolders", "filepath", "typeName"] : ["version", "type", "id", "syncTimestamp"];
+  const allowed: readonly string[] = raw.type === "cancel" ? ["version", "type", "id", "targetId", "syncTimestamp"] : isChat ? ["version", "type", "id", "syncTimestamp", "prompt", "cwd", "workFolders", "projectName", "relatedFile", "relatedClass", "relatedMember"] : isScan ? ["version", "type", "id", "workFolders"] : isCodeGet ? ["version", "type", "id", "projectName", "workFolders", "filepath", "typeName"] : ["version", "type", "id", "syncTimestamp"];
   if (keys.some((key) => !allowed.includes(key))) return err("Invalid request");
   if (isChat && (typeof raw.prompt !== "string" || raw.prompt.length === 0 || raw.prompt.length > 65_536)) return err("Invalid prompt");
   if (!isChat && "prompt" in raw && (typeof raw.prompt !== "string" || raw.prompt.length === 0 || raw.prompt.length > 65_536)) return err("Invalid prompt");
@@ -98,9 +112,15 @@ export async function validateWorkspaceRequest(text: string): Promise<Result<Wor
   if ("cwd" in raw && (typeof raw.cwd !== "string" || raw.cwd.length === 0)) return err("Invalid cwd");
   if (isChat && !Array.isArray(raw.workFolders)) return err("Invalid work folders");
   if ("workFolders" in raw && (!Array.isArray(raw.workFolders) || raw.workFolders.some((folder: unknown) => typeof folder !== "string" || folder.length === 0))) return err("Invalid work folders");
+  if (isChat && (typeof raw.projectName !== "string" || raw.projectName.length === 0)) return err("Invalid project name");
+  if (isChat && (typeof raw.relatedFile !== "string" || typeof raw.relatedClass !== "string" || typeof raw.relatedMember !== "string")) return err("Invalid related context");
   if (isScan && (!Array.isArray(raw.workFolders) || raw.workFolders.length === 0)) return err("Invalid work folders");
   if (isCodeGet && (typeof raw.projectName !== "string" || raw.projectName.length === 0 || !Array.isArray(raw.workFolders) || raw.workFolders.length === 0 || raw.workFolders.some((folder: unknown) => typeof folder !== "string" || folder.length === 0) || typeof raw.filepath !== "string" || raw.filepath.length === 0 || typeof raw.typeName !== "string" || raw.typeName.length === 0)) return err("Invalid code request");
   if ("syncTimestamp" in raw && (typeof raw.syncTimestamp !== "number" || !Number.isSafeInteger(raw.syncTimestamp) || raw.syncTimestamp < 0)) return err("Invalid sync timestamp");
+  if (isChat) {
+    const chatValidation: Result<void, string> = await validateChatPromptRequest(raw);
+    if (chatValidation.isErr()) return err(chatValidation.error);
+  }
   const baseText: string = raw.type === "cancel"
     ? JSON.stringify({
       version: raw.version,
@@ -114,11 +134,19 @@ export async function validateWorkspaceRequest(text: string): Promise<Result<Wor
   const prompt: string | undefined = typeof raw.prompt === "string" ? raw.prompt : undefined;
   const cwd: string | undefined = typeof raw.cwd === "string" ? raw.cwd : undefined;
   const workFolders: readonly string[] | undefined = Array.isArray(raw.workFolders) ? raw.workFolders as readonly string[] : undefined;
+  const projectName: string | undefined = typeof raw.projectName === "string" ? raw.projectName : undefined;
+  const relatedFile: string | undefined = typeof raw.relatedFile === "string" ? raw.relatedFile : undefined;
+  const relatedClass: string | undefined = typeof raw.relatedClass === "string" ? raw.relatedClass : undefined;
+  const relatedMember: string | undefined = typeof raw.relatedMember === "string" ? raw.relatedMember : undefined;
   const scanType: "tests" | "classes" | undefined = raw.type === "scan/tests" ? "tests" : raw.type === "scan/classes" ? "classes" : undefined;
   const context: object = {
     ...(prompt === undefined ? {} : { prompt }),
     ...(cwd === undefined ? {} : { cwd }),
     ...(workFolders === undefined ? {} : { workFolders }),
+    ...(projectName === undefined ? {} : { projectName }),
+    ...(relatedFile === undefined ? {} : { relatedFile }),
+    ...(relatedClass === undefined ? {} : { relatedClass }),
+    ...(relatedMember === undefined ? {} : { relatedMember }),
     ...(scanType === undefined ? {} : { scanType })
     ,...(isCodeGet ? { projectName: raw.projectName as string, workFolders: raw.workFolders as readonly string[], filepath: raw.filepath as string, typeName: raw.typeName as string } : {})
   };

@@ -1,0 +1,524 @@
+import express from '@untrust/mandate-express';
+import { RequestValidationError } from '@untrust/mandate-core';
+import { ALLOWDUPS, UNIQUE, CodingIdentifier, PUBLIC, PublicDisclosure, JsonMap as VVJsonMap, ValidatedRegex, ZodAdapter, vv, vv_CodingIdentifier } from '@untrust/vv/zod';
+import { z } from 'zod';
+import { Archetype, array, defineTypes, defineUncheckedCustomArchetype, DisclosurePolicy, disclosures, issue, noAdditionalValidation, object, PrintableAscii, regexString, type InferValue, type ValidationResult } from '@untrust/vv';
+import { JsonMap } from '@codaigram/shared/json-map';
+import { type ClassDetails, type CompositeTypeT, type FieldType } from '@codaigram/shared/class-types';
+import type { ClassRepository, TestDetails, TestIdentifier, TestInventoryRepository, TestRecord } from './memory-repository.js';
+import type { DatabaseClassChange } from './memory-repository.js';
+import type { ClassHistory, ClassOrigin, ClassUpdate, CurrentClass } from './class-revision.js';
+import { InvalidClassRevisionError } from './class-revision.js';
+import { logAndThrow, logUnhandledRequestError, logValueShape } from './server_utils.js';
+import { ERROR_CODES } from './error-codes.js';
+
+type PublicBooleanDisclosureFactoryT = typeof disclosures.public<boolean>;
+type PublicFieldTypeDisclosureFactoryT = typeof disclosures.public<FieldType>;
+type PublicBooleanDisclosureT = ReturnType<PublicBooleanDisclosureFactoryT>;
+type PublicFieldTypeDisclosureT = ReturnType<PublicFieldTypeDisclosureFactoryT>;
+
+type FieldTypeDefinitionT = {
+  archetype: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>>;
+  disclosure: PublicFieldTypeDisclosureT;
+};
+
+class ProjectName extends ValidatedRegex<PublicDisclosure> {
+  public constructor(raw: string) { super(raw, 1, 200, PUBLIC); }
+
+  protected regexp() { return /^[A-Za-z0-9][A-Za-z0-9_-]*$/; }
+  protected validityDescription() { return "A project name must start with an alpha-numeric, and can then also have underscore and dash"; }
+}
+
+class ShortDescription extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 1000; }
+}
+class VeryLongDescription extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 50000; }
+}
+
+const TestName = CodingIdentifier;
+const TestGroup = CodingIdentifier;
+
+const vv_ProjectParams = vv.object({ projectName: ProjectName });
+const TEST_VALUES = vv.object({
+  group: TestGroup,
+  name: TestName,
+  description: ShortDescription,
+  prompt: VeryLongDescription
+});
+/*type TestGroupT = typeof TEST_VALUES.TestGroup;
+type TestNameT = typeof TEST_VALUES.TestName;
+type TestDescriptionT = typeof TEST_VALUES.TestDescription;
+type TestPromptT = typeof TEST_VALUES.TestPrompt;
+/*const TEST_DETAILS: ReturnType<typeof object<{
+  group: TestGroupT;
+  name: TestNameT;
+  description: TestDescriptionT;
+  prompt: TestPromptT;
+}>> = object({
+  group: TEST_VALUES.TestGroup,
+  name: TEST_VALUES.TestName,
+  description: TEST_VALUES.TestDescription,
+  prompt: TEST_VALUES.TestPrompt });
+*/
+
+const TestIdentifier = vv.object({
+  group: TestGroup,
+  name: TestName
+});
+const TEST_HISTORY_REQUEST = vv.array(TestIdentifier, { min: 1, max: 100 }, ALLOWDUPS);
+
+function testChangeDto() { return vv.object({ when: vv.string(), text: vv.string() }); }
+const TEST_CHANGE_DTO: ReturnType<typeof testChangeDto> = testChangeDto();
+function testHistoryDto() { return vv.object({
+  group: vv.string(),
+  name: vv.string(),
+  prompts: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
+  descriptions: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
+}); }
+const TEST_HISTORY_DTO: ReturnType<typeof testHistoryDto> = testHistoryDto();
+function testSummaryDto() { return vv.object({
+  group: vv.string(),
+  name: vv.string(),
+  description: vv.string(),
+  lastChangedAt: vv.string(),
+}); }
+const TEST_SUMMARY_DTO: ReturnType<typeof testSummaryDto> = testSummaryDto();
+
+function testPromptHistoryDto() { return vv.object({
+  when: vv.string().trim().min(1).max(100),
+  text: vv.string().min(1).max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+$/u),
+}).strict(); }
+const TEST_PROMPT_HISTORY_DTO: ReturnType<typeof testPromptHistoryDto> = testPromptHistoryDto();
+function testUpdateDto() { return vv.object({
+  group: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  description: vv.string().trim().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
+  prompt: vv.string().max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/u).optional(),
+  prompts: vv.array(TEST_PROMPT_HISTORY_DTO, { min: 0, max: 100 }, ALLOWDUPS).optional(),
+}).strict(); }
+const TEST_UPDATE_DTO: ReturnType<typeof testUpdateDto> = testUpdateDto();
+function testUpdateBatchDto() { return vv.array(TEST_UPDATE_DTO, { min: 1, max: 10000 }, ALLOWDUPS); }
+const TEST_UPDATE_BATCH_DTO: ReturnType<typeof testUpdateBatchDto> = testUpdateBatchDto();
+type TestUpdateBatchT = TestDetails[];
+const TEST_UPDATE_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<TestUpdateBatchT>> = defineUncheckedCustomArchetype<TestUpdateBatchT>({
+  kind: 'codaigram.test-update-batch',
+  validate: (input: unknown) => {
+    const result: z.ZodSafeParseResult<z.output<typeof TEST_UPDATE_BATCH_DTO>> = TEST_UPDATE_BATCH_DTO.safeParse(input);
+    if (!result.success) return {
+      success: false,
+      issues: [issue(ERROR_CODES.TEST_UPDATE_INVALID, 'Invalid test update.')],
+    };
+    const tests: TestDetails[] = result.data.map((item) => ({
+      group: item.group,
+      name: item.name,
+      description: item.description,
+      prompt: item.prompt ?? '',
+      prompts: (item.prompts ?? []).map((entry) => ({ when: entry.when, text: entry.text })),
+    }));
+    return { success: true, value: tests };
+  },
+});
+type TestUpdateDisclosureFactoryT = typeof disclosures.public<TestUpdateBatchT>;
+type TestUpdateDisclosureT = ReturnType<TestUpdateDisclosureFactoryT>;
+type TestUpdateDefinitionT = {
+  archetype: typeof TEST_UPDATE_ARCHETYPE;
+  disclosure: TestUpdateDisclosureT;
+};
+const testUpdateDefinition: TestUpdateDefinitionT = {
+  archetype: TEST_UPDATE_ARCHETYPE,
+  disclosure: disclosures.public<TestUpdateBatchT>(),
+};
+const TEST_UPDATE_VALUES: ReturnType<typeof defineTypes<{ TestUpdate: TestUpdateDefinitionT }>> = defineTypes({ TestUpdate: testUpdateDefinition });
+type TestUpdateValueT = typeof TEST_UPDATE_VALUES.TestUpdate;
+const TEST_UPDATE_VALUE: TestUpdateValueT = TEST_UPDATE_VALUES.TestUpdate;
+
+// VV currently has no built-in boolean archetype; this checks the primitive exactly, without coercion.
+const BOOLEAN: ReturnType<typeof defineUncheckedCustomArchetype<boolean>> = defineUncheckedCustomArchetype<boolean>({
+  kind: 'codaigram.boolean',
+  validate: (input: unknown) => typeof input === 'boolean' ? { success: true, value: input } : {
+    success: false,
+    issues: [issue(ERROR_CODES.BOOLEAN_INVALID, 'Expected a boolean.')] } });
+type BooleanValueDefinitionT = {
+  archetype: typeof BOOLEAN;
+  //classification: PublicClassificationT;
+  disclosure: PublicBooleanDisclosureT;
+};
+class NonTrivialTypeText extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 1000; }
+};
+
+type CompositeTypeDto = NonTrivialTypeText | CodingIdentifier[] | JsonMap<CodingIdentifier, CompositeTypeDto>;
+const COMPOSITE_TYPE_SCHEMA: z.ZodType<CompositeTypeDto> = vv.lazy(() => {
+  const enumValues: z.ZodType<CodingIdentifier[]> = vv.array(CodingIdentifier, { min: 0, max: 100 }, ALLOWDUPS);
+  const namedTuple = vv.recordMap(CodingIdentifier, COMPOSITE_TYPE_SCHEMA, { min: 0, max: 100 });
+  return vv.union([NonTrivialTypeText, enumValues, namedTuple]) as z.ZodType<CompositeTypeDto>;
+});
+
+function validateFieldType(input: unknown): ValidationResult<FieldType> {
+  // UNTRUST-ALLOW-NULLISH: An untrusted JSON field description can be null at the HTTP boundary, so reject that absent value before safely inspecting its required arg and type properties.
+  if (typeof input !== 'object' || input === null || Array.isArray(input) || !('arg' in input) || !('t' in input) || typeof input.arg !== 'string' || input.arg.length === 0 || input.arg.length > 100 || !/^(?:\+[A-Z]+|[A-Za-z_][A-Za-z0-9_]*)$/.test(input.arg)) {
+    return {
+      success: false,
+      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a field with arg and t.')] };
+  }
+  const compositeResult: z.ZodSafeParseResult<CompositeTypeT> = COMPOSITE_TYPE_SCHEMA.safeParse(input.t);
+  if (!compositeResult.success) return {
+    success: false,
+    issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Invalid composite field type.')] };
+  if ('mutability' in input && input.mutability !== 'm' && input.mutability !== 'x' && input.mutability !== 'r') return {
+    success: false,
+    issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Invalid argument mutability.')] };
+  const field: FieldType = { arg: input.arg, t: compositeResult.data };
+  if ('mutability' in input && (input.mutability === 'm' || input.mutability === 'x' || input.mutability === 'r')) field.mutability = input.mutability;
+  return { success: true, value: field };
+}
+
+type FieldTypeValidatorT = (input: unknown) => ValidationResult<FieldType>;
+const fieldTypeValidator: FieldTypeValidatorT = (input) => validateFieldType(input);
+const FIELD_TYPE: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>> = defineUncheckedCustomArchetype<FieldType>({
+  kind: 'codaigram.field-type',
+  validate: fieldTypeValidator });
+const fieldTypeDefinition: FieldTypeDefinitionT = {
+  archetype: FIELD_TYPE,
+  //classification: classifications.public(),
+  disclosure: disclosures.public<FieldType>()
+};
+const vv_RelationKindDefinition = vv.enum(['OWNS', 'REF', 'UNK']);
+const multiplicityDefinition: BooleanValueDefinitionT = {
+  archetype: BOOLEAN,
+  //classification: classifications.public(),
+  disclosure: disclosures.public<boolean>()
+};
+const VALUES = vv.object({
+  Method: NonTrivialTypeText,
+  FieldType: fieldTypeDefinition,
+  RelationName: CodingIdentifier,
+  RelationKind: vv_RelationKindDefinition,
+  Multiplicity: multiplicityDefinition
+});
+
+function classOriginDto() { return vv.object({
+  kind: vv.enum(['scan', 'ai', 'user']),
+  name: vv.val(CodingIdentifier),
+  version: vv.string().trim().min(1).max(100).regex(/^[\x20-\x7e]+$/),
+}).strict(); }
+const CLASS_ORIGIN_DTO: ReturnType<typeof classOriginDto> = classOriginDto();
+const VERSIONED_FIELD_DTO: z.ZodType<FieldType> = z.unknown().transform<FieldType>((input, context) => {
+  const result: ValidationResult<FieldType> = validateFieldType(input);
+  if (result.success) return result.value;
+  context.addIssue({ code: 'custom', message: 'Invalid field type.' });
+  return z.NEVER;
+});
+const MEMBER_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/).optional();
+const RELATION_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/).optional();
+const OVERLOAD_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(256000).regex(/^[\x20-\x7e]*$/).optional();
+function versionedOverloadDto() { return vv.object({
+  args: vv.array(VERSIONED_FIELD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  modifies: OVERLOAD_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_OVERLOAD_DTO: ReturnType<typeof versionedOverloadDto> = versionedOverloadDto();
+function versionedMemberDto() { return vv.object({
+  name: vv.string().max(1000).regex(/^[\x20-\x7e]*$/),
+  overloads: vv.array(VERSIONED_OVERLOAD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  rettype: COMPOSITE_TYPE_SCHEMA.optional(),
+  modifies: MEMBER_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_MEMBER_DTO: ReturnType<typeof versionedMemberDto> = versionedMemberDto();
+function versionedRelationDto() { return vv.object({
+  kind: vv_RelationKindDefinition,
+  name: CodingIdentifier,
+  member: vv_CodingIdentifier.optional(),
+  target: CodingIdentifier,
+  many: vv.boolean(),
+  modifies: RELATION_MODIFIES_DTO,
+}).strict(); }
+const VERSIONED_RELATION_DTO: ReturnType<typeof versionedRelationDto> = versionedRelationDto();
+function versionedClassDto() { return vv.object({
+  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  renameOf: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
+  state: vv.enum(['partial', 'deleted', 'delegate', 'union', 'alias']).optional(),
+  aliasType: COMPOSITE_TYPE_SCHEMA.optional(),
+  usage: vv.enum(['ex', 'dto']).optional(),
+  sourceFile: vv.string().min(1).max(1024).regex(/^[^\x00-\x1f\x7f]+$/u).optional(),
+  modifiedAt: vv.string().datetime().optional(),
+  methods: vv.array(VERSIONED_MEMBER_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  relations: vv.array(VERSIONED_RELATION_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+}).strict().refine((value) => value.state !== 'delegate' || value.methods.length === 1 && value.methods.some((member) => member.name === '' && member.overloads.length === 1 && Object.hasOwn(member, 'rettype')) && value.relations.length === 0).refine((value) => value.state === 'delegate' || value.methods.every((member) => member.name !== '' && !Object.hasOwn(member, 'rettype'))); }
+const VERSIONED_CLASS_DTO: ReturnType<typeof versionedClassDto> = versionedClassDto();
+function versionedBatchDto() { return vv.object({
+  origin: CLASS_ORIGIN_DTO,
+  classes: vv.array(VERSIONED_CLASS_DTO, { min: 1, max: 100 }, ALLOWDUPS),
+}).strict(); }
+const VERSIONED_BATCH_DTO: ReturnType<typeof versionedBatchDto> = versionedBatchDto();
+
+function normalizeVersionedClass(value: z.output<typeof VERSIONED_CLASS_DTO>): ClassUpdate {
+  const result: ClassUpdate = {
+    name: value.name,
+    methods: value.methods.map((member) => {
+      const result: ClassUpdate['methods'][number] = {
+        name: member.name,
+        overloads: member.overloads.map((overload) => {
+          const item: ClassUpdate['methods'][number]['overloads'][number] = { args: overload.args };
+          if (typeof overload.modifies === 'string') item.modifies = overload.modifies;
+          return item;
+        }),
+      };
+      if (Object.hasOwn(member, 'rettype')) result.rettype = member.rettype as CompositeTypeT;
+      if (typeof member.modifies === 'string') result.modifies = member.modifies;
+      return result;
+    }),
+    relations: value.relations.map((relation) => {
+      const result: ClassUpdate['relations'][number] = {
+        kind: relation.kind,
+        name: relation.name,
+        target: relation.target,
+        many: relation.many,
+      };
+      if (typeof relation.member === 'string') result.member = relation.member;
+      if (typeof relation.modifies === 'string') result.modifies = relation.modifies;
+      return result;
+    }),
+  };
+  if (value.renameOf) result.renameOf = value.renameOf;
+  if (value.state) result.state = value.state;
+  if (value.aliasType !== undefined) result.aliasType = value.aliasType;
+  if (value.usage) result.usage = value.usage;
+  if (value.sourceFile) result.sourceFile = value.sourceFile;
+  if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
+  return result;
+}
+
+type ClassBatchT = { origin: ClassOrigin; classes: ClassUpdate[] };
+const CLASS_BATCH_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<ClassBatchT>> = defineUncheckedCustomArchetype<ClassBatchT>({
+  kind: 'codaigram.class-update-batch',
+  validate: (input: unknown) => {
+    const parsed: z.ZodSafeParseResult<z.output<typeof VERSIONED_BATCH_DTO>> = VERSIONED_BATCH_DTO.safeParse(input);
+    if (!parsed.success) return {
+      success: false,
+      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid class update.')],
+    };
+    return {
+      success: true,
+      value: {
+        origin: { ...parsed.data.origin, name: parsed.data.origin.name.exposeUnchecked() },
+        classes: parsed.data.classes.map(normalizeVersionedClass),
+      },
+    };
+  },
+});
+type ClassBatchDisclosureFactoryT = typeof disclosures.public<ClassBatchT>;
+type ClassBatchDisclosureT = ReturnType<ClassBatchDisclosureFactoryT>;
+type ClassBatchDefinitionT = {
+  archetype: typeof CLASS_BATCH_ARCHETYPE;
+  disclosure: ClassBatchDisclosureT;
+};
+const classBatchDefinition: ClassBatchDefinitionT = {
+  archetype: CLASS_BATCH_ARCHETYPE,
+  disclosure: disclosures.public<ClassBatchT>(),
+};
+const CLASS_BATCH_TYPES: ReturnType<typeof defineTypes<{ ClassBatch: ClassBatchDefinitionT }>> = defineTypes({ ClassBatch: classBatchDefinition });
+type ClassBatchValueT = typeof CLASS_BATCH_TYPES.ClassBatch;
+const CLASS_BATCH_VALUE: ClassBatchValueT = CLASS_BATCH_TYPES.ClassBatch;
+
+type RevisionRequestT = { howFarBack: number };
+const REVISION_REQUEST_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<RevisionRequestT>> = defineUncheckedCustomArchetype<RevisionRequestT>({
+  kind: 'codaigram.revision-request',
+  validate: (input: unknown) => {
+    const parsed: z.ZodSafeParseResult<{ howFarBack: number }> = vv.object({ howFarBack: z.number().int().min(0).max(999) }).strict().safeParse(input);
+    return parsed.success ? { success: true, value: parsed.data } : {
+      success: false,
+      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid revision request.')],
+    };
+  },
+});
+type RevisionRequestDefinitionT = {
+  archetype: typeof REVISION_REQUEST_ARCHETYPE;
+  disclosure: RevisionRequestDisclosureT;
+};
+type RevisionRequestDisclosureFactoryT = typeof disclosures.public<RevisionRequestT>;
+type RevisionRequestDisclosureT = ReturnType<RevisionRequestDisclosureFactoryT>;
+const revisionRequestDefinition: RevisionRequestDefinitionT = {
+  archetype: REVISION_REQUEST_ARCHETYPE,
+  disclosure: disclosures.public<RevisionRequestT>(),
+};
+const REVISION_REQUEST_TYPES: ReturnType<typeof defineTypes<{ Request: RevisionRequestDefinitionT }>> = defineTypes({ Request: revisionRequestDefinition });
+
+class DuplicateClassError extends Error {}
+
+type ErrorMiddlewareT = (
+  error: unknown,
+  request: unknown,
+  response: Parameters<Parameters<ReturnType<typeof express>['get']>[2]>[1],
+  next: (error: unknown) => void) => void;
+
+/**
+ * The current snapshot retains per-member provenance so `getClassesHistory`
+ * can reconstruct the selected class's history.  `getClasses` is deliberately
+ * an inventory endpoint: its class entries must remain the public ClassDetails
+ * shape, while the one project-wide latest delta is exposed as `lastChange`.
+ */
+function classDetailsFromCurrent(value: CurrentClass): ClassDetails {
+  const result: ClassDetails = {
+    name: value.name,
+    methods: value.methods.map((member) => {
+      const result: ClassDetails['methods'][number] = {
+        name: member.name,
+        overloads: member.overloads.map((overload) => overload.args),
+      };
+      if (Object.hasOwn(member, 'rettype')) result.rettype = member.rettype;
+      return result;
+    }),
+    relations: value.relations.map((relation) => {
+      const result: ClassDetails['relations'][number] = {
+        kind: relation.kind,
+        name: relation.name,
+        target: relation.target,
+        many: relation.many,
+      };
+      if (typeof relation.member === 'string') result.member = relation.member;
+      return result;
+    }),
+  };
+  if (value.state) result.state = value.state;
+  if (value.aliasType !== undefined) result.aliasType = value.aliasType;
+  if (value.usage) result.usage = value.usage;
+  if (value.sourceFile) result.sourceFile = value.sourceFile;
+  if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
+  return result;
+}
+
+const logRequestError: ErrorMiddlewareT = (error, _request, _response, next) => {
+  logUnhandledRequestError(error);
+  next(error);
+};
+
+const respondToRequestError: ErrorMiddlewareT = (error, _request, response, _next) => {
+  if (error instanceof Error && 'status' in error && error.status === 413) {
+    response.status(413).json({ error: 'Request is too large.' });
+  } else if (error instanceof RequestValidationError || error instanceof DuplicateClassError || error instanceof InvalidClassRevisionError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {
+    response.status(400).json({ error: 'Invalid request.' });
+  } else {
+    response.status(500).json({ error: 'Request could not be completed.' });
+  }
+};
+
+export function createApp(repository: ClassRepository & TestInventoryRepository): ReturnType<typeof express> {
+  const app: ReturnType<typeof express> = express();
+  app.use(express.json({ limit: '256kb' }));
+  app.get('/health', {}, (_request, response) => { response.json({ status: 'ok' }); });
+  app.get('/api/getProjects', {}, async (_request, response) => {
+    const projectNames: string[] = await repository.getProjects();
+    response.json(projectNames);
+  });
+  app.post('/api/createProject', { body: vv_ProjectParams }, async (request, response) => {
+    const projectName: string = request.body.projectName.exposeUnchecked();
+    await repository.createProject(projectName);
+    response.status(201).json({ projectName });
+  });
+  app.post('/api/:projectName/classesDetails', {
+    params: vv_ProjectParams,
+    body: vv.object({
+      classNames: vv.array(vv_CodingIdentifier, { min: 1, max: 100 }, UNIQUE) }) }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const names: string[] = request.body.classNames.map((className) => className.exposeUnchecked());
+    const details: ClassDetails[] = await repository.getDetails(projectName, names);
+    response.json(details);
+  });
+  app.get('/api/:projectName/getClasses', { params: vv_ProjectParams }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const current: CurrentClass[] = await repository.getClassSnapshots(projectName);
+    const names: Set<string> = new Set(current.map((item: CurrentClass) => item.name));
+    // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
+    const legacy: ClassDetails[] = (await repository.getClasses(projectName)).filter((item: ClassDetails) => !names.has(item.name));
+    const exposed: ClassDetails[] = current.map(classDetailsFromCurrent);
+    const result: {
+      classes: ClassDetails[];
+      lastChange?: DatabaseClassChange;
+    } = {
+      classes: [...legacy, ...exposed].sort((left, right) => left.name.localeCompare(right.name)),
+    };
+    const lastChange: DatabaseClassChange | undefined = await repository.getLastClassChange(projectName);
+    if (lastChange) result.lastChange = lastChange;
+    response.json(result);
+  });
+  app.post('/api/:projectName/getClassesHistory', {
+    params: vv_ProjectParams,
+    body: object({
+      classNames: array(vv_CodingIdentifier, { minimum: 1, maximum: 100 }),
+    }),
+  }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const history: ClassHistory[] = await repository.getClassHistory(projectName, request.body.classNames.map((item) => item.exposeUnchecked()));
+    response.json(history.map((item: ClassHistory) => {
+      const result: {
+        name: string;
+        methods: ClassHistory['methods'];
+        relations: ClassHistory['relations'];
+        renames: ClassHistory['renames'];
+        state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
+        usage?: 'ex' | 'dto';
+      } = {
+        name: item.name,
+        methods: item.methods,
+        relations: item.relations,
+        renames: item.renames,
+      };
+      if (item.state) result.state = item.state;
+      if (item.usage) result.usage = item.usage;
+      return result;
+    }));
+  });
+  app.post('/api/:projectName/getRevisionIds', {
+    params: vv_ProjectParams,
+    body: REVISION_REQUEST_TYPES.Request,
+  }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const input: RevisionRequestT = request.body.exposeUnchecked();
+    response.json(await repository.getRevisionIds(projectName, input.howFarBack));
+  });
+  app.post('/api/:projectName/updateClasses', { params: vv_ProjectParams, body: CLASS_BATCH_VALUE }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    logValueShape('Validated /api/updateClasses body shape', request.body);
+    const batch: ClassBatchT = request.body.exposeUnchecked();
+    if (new Set(batch.classes.map((item) => item.name)).size !== batch.classes.length) logAndThrow(new DuplicateClassError());
+    const origin: ClassOrigin = batch.origin.kind === 'user'
+      ? {
+        kind: 'user',
+        name: 'yariv',
+        version: batch.origin.version,
+      }
+      : batch.origin;
+    await repository.updateClassSnapshots(projectName, batch.classes, origin);
+    response.json({ updated: batch.classes.length });
+  });
+  app.get('/api/:projectName/getTests', { params: vv_ProjectParams }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const tests: TestRecord[] = await repository.getTests(projectName);
+    response.json(tests.map((item: TestRecord) => TEST_SUMMARY_DTO.parse(item)));
+  });
+  app.post('/api/:projectName/getHistory', { params: vv_ProjectParams, body: TEST_HISTORY_REQUEST }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const identifiers: TestIdentifier[] = request.body.map((item) => ({
+      group: item.group.exposeUnchecked(),
+      name: item.name.exposeUnchecked(),
+    }));
+    response.json((await repository.getHistory(projectName, identifiers)).map((item) => TEST_HISTORY_DTO.parse(item)));
+  });
+  app.post('/api/:projectName/updateTests', { params: vv_ProjectParams, body: TEST_UPDATE_VALUE }, async (request, response) => {
+    const projectName: string = request.params.projectName.exposeUnchecked();
+    const tests: TestDetails[] = request.body.exposeUnchecked();
+    if (new Set(tests.map((item: TestDetails) => `${item.group}.${item.name}`)).size !== tests.length) logAndThrow(new DuplicateClassError());
+    await repository.updateTests(projectName, tests);
+    response.json({ updated: tests.length });
+  });
+  app.use(express.trustedMiddleware(logRequestError));
+  app.use(express.trustedMiddleware(respondToRequestError));
+  return app;
+}

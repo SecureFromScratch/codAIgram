@@ -45,7 +45,7 @@ const EXPECTED_DETAILS: readonly ClassDetails[] = [
         name: 'relations',
         overloads: [[{
           arg: '+RW',
-          t: "{ kind: 'OWNS' | 'REF' | 'UNK'; name: string; target: string; many: boolean; }[]"
+          t: "{ kind: 'OWNS' | 'REF' | 'UNK'; name: string; member?: string; target: string; many: boolean; }[]"
         }]]
       },
       { name: 'state', overloads: [[{ arg: '+RW', t: ['partial', 'deleted'] }]] }
@@ -95,7 +95,9 @@ const EXPECTED_DETAILS: readonly ClassDetails[] = [
     relations: [
       { kind: 'UNK', name: 'contract', target: 'TaskContract', many: false },
       { kind: 'UNK', name: 'children', target: 'ChildTask', many: true },
-      { kind: 'UNK', name: 'assignees', target: 'AssigneeContract', many: true }
+      { kind: 'UNK', name: 'assignees', target: 'AssigneeContract', many: true },
+      { kind: 'UNK', name: 'hiddenChildren', member: 'hiddenChildren', target: 'ChildTask', many: true },
+      { kind: 'UNK', name: 'internalCode', member: 'internalCode', target: 'TaskContract', many: false }
     ],
     },
   {
@@ -179,13 +181,25 @@ export function registerUploadsMockProjectClassesCase(): void {
       assert.match(output, /^  METHOD lookup\(value: string \| number\)$/m);
       assert.match(output, /^  ACCESSOR count \+PROP: number$/m);
       assert.match(output, /^  RELATION UNK assignees: AssigneeContract\[\]$/m);
-      assert.match(output, /^  FIELD relations \+RW: \{ kind: 'OWNS' \| 'REF' \| 'UNK'; name: string; target: string; many: boolean; \}\[\]$/m);
+      assert.match(output, /^  RELATION UNK internalCode: TaskContract$/m);
+      assert.match(output, /^  FIELD relations \+RW: \{ kind: 'OWNS' \| 'REF' \| 'UNK'; name: string; member\?: string; target: string; many: boolean; \}\[\]$/m);
       const response: Response = await loggedFetch(`${serverUrl}/api/mock-class-project/classesDetails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classNames: EXPECTED_DETAILS.map((detail: ClassDetails) => detail.name) }) });
       assert.equal(response.status, 200);
       const received: ClassDetails[] = await response.json() as ClassDetails[];
+      const scannedTask: ClassDetails | undefined = received.find((detail: ClassDetails) => detail.name === 'Task');
+      assert.ok(scannedTask);
+      const publicRelation: ClassDetails['relations'][number] | undefined = scannedTask.relations.find((relation) => relation.name === 'contract');
+      assert.ok(publicRelation);
+      assert.equal(Object.hasOwn(publicRelation, 'member'), false);
+      const privateRelation: ClassDetails['relations'][number] | undefined = scannedTask.relations.find((relation) => relation.name === 'internalCode');
+      assert.ok(privateRelation);
+      assert.equal(privateRelation.member, 'internalCode');
+      const protectedRelation: ClassDetails['relations'][number] | undefined = scannedTask.relations.find((relation) => relation.name === 'hiddenChildren');
+      assert.ok(protectedRelation);
+      assert.equal(protectedRelation.member, 'hiddenChildren');
       received.forEach((item: ClassDetails) => {
         assert.ok(item.sourceFile);
         assert.equal(item.modifiedAt, statSync(path.resolve('scanner/mock-testproject', item.sourceFile)).mtime.toISOString());

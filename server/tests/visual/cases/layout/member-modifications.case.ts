@@ -75,6 +75,8 @@ export function registerMemberModificationsCase(): void {
     await page.reload();
     const changed: Locator = page.locator('[data-class-name="Example"] [data-member-change="changed"]');
     const deleted: Locator = page.locator('[data-class-name="Example"] [data-member-change="deleted"]');
+    await changed.first().waitFor({ state: 'visible' });
+    await deleted.first().waitFor({ state: 'visible' });
     assert.equal(await changed.count(), 2);
     assert.equal(await deleted.count(), 2);
     for (let index: number = 0; index < await changed.count(); index += 1) {

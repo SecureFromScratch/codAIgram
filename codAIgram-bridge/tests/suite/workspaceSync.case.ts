@@ -23,7 +23,11 @@ export function registerWorkspaceSyncCase(): void {
       syncTimestamp: 5,
       prompt: "Inspect the project",
       cwd: "C:\\workspace",
-      workFolders: []
+      workFolders: [],
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const validatedChat: WorkspaceSyncRequest = (await validateWorkspaceRequest(JSON.stringify(synchronizedChat)))._unsafeUnwrap();
     assert.ok(isChatPromptRequest(validatedChat));
@@ -33,7 +37,11 @@ export function registerWorkspaceSyncCase(): void {
       syncTimestamp: 5,
       prompt: "Inspect the project",
       cwd: "C:\\workspace",
-      workFolders: []
+      workFolders: [],
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     });
     const promptedChat: object = {
       version: 1,
@@ -42,7 +50,11 @@ export function registerWorkspaceSyncCase(): void {
       prompt: "Inspect the project",
       syncTimestamp: 5,
       cwd: "C:\\workspace",
-      workFolders: []
+      workFolders: [],
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const promptedExpected: object = {
       type: "chat",
@@ -50,7 +62,11 @@ export function registerWorkspaceSyncCase(): void {
       prompt: "Inspect the project",
       syncTimestamp: 5,
       cwd: "C:\\workspace",
-      workFolders: []
+      workFolders: [],
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     assert.deepStrictEqual((await validateWorkspaceRequest(JSON.stringify(promptedChat)))._unsafeUnwrap(), promptedExpected);
     const invalidPromptPing: object = {
@@ -65,7 +81,11 @@ export function registerWorkspaceSyncCase(): void {
       id: "missing-cwd",
       prompt: "Inspect",
       workFolders: [],
-      syncTimestamp: 5
+      syncTimestamp: 5,
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const missingWorkFoldersRequest: object = {
       version: 1,
@@ -73,7 +93,11 @@ export function registerWorkspaceSyncCase(): void {
       id: "missing-work-folders",
       prompt: "Inspect",
       cwd: "C:\\workspace",
-      syncTimestamp: 5
+      syncTimestamp: 5,
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const missingPromptRequest: object = {
       version: 1,
@@ -81,7 +105,11 @@ export function registerWorkspaceSyncCase(): void {
       id: "missing-prompt",
       cwd: "C:\\workspace",
       workFolders: [],
-      syncTimestamp: 5
+      syncTimestamp: 5,
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const emptyWorkFolderRequest: object = {
       version: 1,
@@ -90,7 +118,11 @@ export function registerWorkspaceSyncCase(): void {
       prompt: "Inspect",
       cwd: "C:\\workspace",
       workFolders: [""],
-      syncTimestamp: 5
+      syncTimestamp: 5,
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     const emptyCwdRequest: object = {
       version: 1,
@@ -99,7 +131,11 @@ export function registerWorkspaceSyncCase(): void {
       prompt: "Inspect",
       cwd: "",
       workFolders: [],
-      syncTimestamp: 5
+      syncTimestamp: 5,
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
     };
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(invalidPromptPing)))._unsafeUnwrapErr(), "Invalid request");
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify({ version: 1, type: "chat", id: "one", extra: true })))._unsafeUnwrapErr(), "Invalid request");
@@ -107,7 +143,20 @@ export function registerWorkspaceSyncCase(): void {
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(missingWorkFoldersRequest)))._unsafeUnwrapErr(), "Invalid work folders");
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(missingPromptRequest)))._unsafeUnwrapErr(), "Invalid prompt");
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(emptyWorkFolderRequest)))._unsafeUnwrapErr(), "Invalid work folders");
-    assert.strictEqual((await validateWorkspaceRequest(JSON.stringify({ version: 1, type: "chat", id: "one", syncTimestamp: -1, prompt: "Inspect", cwd: "C:\\workspace", workFolders: [] })))._unsafeUnwrapErr(), "Invalid sync timestamp");
+    const negativeTimestampChat: object = {
+      version: 1,
+      type: "chat",
+      id: "one",
+      syncTimestamp: -1,
+      prompt: "Inspect",
+      cwd: "C:\\workspace",
+      workFolders: [],
+      projectName: "bridge-project",
+      relatedFile: "",
+      relatedClass: "",
+      relatedMember: ""
+    };
+    assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(negativeTimestampChat)))._unsafeUnwrapErr(), "Invalid sync timestamp");
     assert.strictEqual((await validateWorkspaceRequest(JSON.stringify(emptyCwdRequest)))._unsafeUnwrapErr(), "Invalid cwd");
     const scanRequest: object = {
       version: 1,

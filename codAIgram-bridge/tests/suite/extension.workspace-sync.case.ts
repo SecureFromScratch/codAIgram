@@ -42,9 +42,14 @@ export function registerWorkspaceSyncIntegrationCase(getApi: () => BridgeApi): v
         version: 1,
         type: "chat",
         id: "chat",
+        syncTimestamp: 0,
         prompt: "Inspect the project",
         cwd: "C:\\workspace",
-        workFolders: []
+        workFolders: [],
+        projectName: "mock-project",
+        relatedFile: "",
+        relatedClass: "",
+        relatedMember: ""
       }));
       assert.deepStrictEqual(JSON.parse(await nextMessage(connection)), {
         version: 1,
@@ -61,7 +66,11 @@ export function registerWorkspaceSyncIntegrationCase(getApi: () => BridgeApi): v
         syncTimestamp: 0,
         prompt: "Inspect the project",
         cwd: "C:\\workspace",
-        workFolders: []
+        workFolders: [],
+        projectName: "mock-project",
+        relatedFile: "",
+        relatedClass: "",
+        relatedMember: ""
       };
       connection.socket.send(JSON.stringify(minimalChatRequest));
       assert.deepStrictEqual(JSON.parse(await nextMessage(connection)), {

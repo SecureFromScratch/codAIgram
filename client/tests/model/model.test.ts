@@ -8,6 +8,7 @@ import { registerRejectSeparatorCase } from './cases/reject-separator.case';
 import { registerRejectUnknownCase } from './cases/reject-unknown.case';
 import { registerSemanticUpdateCase } from './cases/semantic-update.case';
 import { registerValidMultilineCase } from './cases/valid-multiline.case';
+import { registerDelegateRoundtripCase } from './cases/delegate-roundtrip.case';
 
 describe('diagram projection', () => {
   registerMulticlassCase();
@@ -19,4 +20,5 @@ describe('diagram projection', () => {
   registerRejectIncompleteCase();
   registerRejectUnknownCase();
   registerOwnershipCase();
+  registerDelegateRoundtripCase();
 });

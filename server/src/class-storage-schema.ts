@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ALLOWDUPS, vv } from '@untrust/vv/zod';
-import { isFieldType } from '@codaigram/shared/class-types';
-import type { FieldType } from '@codaigram/shared/class-types';
+import { isCompositeType, isFieldType } from '@codaigram/shared/class-types';
+import type { CompositeTypeT, FieldType } from '@codaigram/shared/class-types';
 import type { ClassRevision, CurrentClass } from './class-revision.js';
 import { logAndThrow, logStorageValidationIssues, warnLegacyPartialField } from './server_utils.js';
 import { StorageError } from './storage-error.js';
@@ -18,8 +18,8 @@ function isBoundedComposite(value: unknown, depth: number): boolean {
 function originDto() { return vv.object({
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
   kind: vv.enum(['scan', 'ai', 'user', 'legacy']),
-  name: vv.string().min(1).max(100).regex(/^[^\x00-\x1f\x7f]+$/u),
-  version: vv.string().min(1).max(100).regex(/^[\x20-\x7e]+$/),
+  name: z.string().min(1).max(100).regex(/^[^\x00-\x1f\x7f]+$/u),
+  version: z.string().min(1).max(100).regex(/^[\x20-\x7e]+$/),
 }).strict(); }
 const ORIGIN_DTO: ReturnType<typeof originDto> = originDto();
 const FIELD_DTO: z.ZodType<FieldType> = z.unknown().transform<FieldType>((input, context) => {
@@ -32,66 +32,94 @@ const FIELD_DTO: z.ZodType<FieldType> = z.unknown().transform<FieldType>((input,
   if (field.mutability) result.mutability = field.mutability;
   return result;
 });
-function argsDto() { return vv.array(FIELD_DTO, { min: 0, max: 100 }, ALLOWDUPS); }
+function argsDto() { return vv.array(FIELD_DTO, { min: 0, max: 100 }, ALLOWDUPS).refine((args) => args.every((field, index) => field.arg !== '+RET' || index === 0)); }
 const ARGS_DTO: ReturnType<typeof argsDto> = argsDto();
+const RETURN_TYPE_DTO: z.ZodType<CompositeTypeT> = z.unknown().transform<CompositeTypeT>((input, context) => {
+  if (isCompositeType(input) && isBoundedComposite(input, 0)) return input as CompositeTypeT;
+  context.addIssue({
+    code: 'custom',
+    message: 'Invalid stored delegate return type.' });
+  return z.NEVER;
+});
 function storedOverloadDto() { return vv.object({
   args: ARGS_DTO,
   origin: ORIGIN_DTO,
-  changedAt: vv.string().min(1).max(100).default('unknown'),
+  changedAt: z.string().min(1).max(100).default('unknown'),
 }).strict(); }
 const STORED_OVERLOAD_DTO: ReturnType<typeof storedOverloadDto> = storedOverloadDto();
 function storedMemberDto() { return vv.object({
-  name: vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
+  name: z.string().max(1000).regex(/^[\x20-\x7e]*$/),
   overloads: vv.array(STORED_OVERLOAD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
+  // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
+  rettype: RETURN_TYPE_DTO.optional(),
   origin: ORIGIN_DTO,
-  changedAt: vv.string().min(1).max(100).default('unknown'),
-}).strict(); }
+  changedAt: z.string().min(1).max(100).default('unknown'),
+}).strict().transform((value) => ({
+  name: value.name,
+  overloads: value.overloads.map((overload) => ({
+    ...overload,
+    args: value.rettype === undefined ? overload.args : [{ arg: '+RET', t: value.rettype }, ...overload.args],
+  })),
+  origin: value.origin,
+  changedAt: value.changedAt,
+})); }
 const STORED_MEMBER_DTO: ReturnType<typeof storedMemberDto> = storedMemberDto();
 function storedRelationDto() { return vv.object({
   kind: vv.enum(['OWNS', 'REF', 'UNK']),
-  name: vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
-  target: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  name: z.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
+  member: z.string().max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
+  target: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   many: vv.boolean(),
   origin: ORIGIN_DTO,
-  changedAt: vv.string().min(1).max(100).default('unknown'),
+  changedAt: z.string().min(1).max(100).default('unknown'),
 }).strict(); }
 const STORED_RELATION_DTO: ReturnType<typeof storedRelationDto> = storedRelationDto();
 function storedClassDto() { return vv.object({
-  name: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  name: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   nonCryptoGuid: z.string().uuid().optional(),
   usage: vv.enum(['ex', 'dto']).optional(),
-  sourceFile: vv.string().min(1).max(1024).optional(),
-  modifiedAt: vv.string().datetime().optional(),
+  sourceFile: z.string().min(1).max(1024).optional(),
+  modifiedAt: z.string().datetime().optional(),
   methods: vv.array(STORED_MEMBER_DTO, { min: 0, max: 100 }, ALLOWDUPS),
   relations: vv.array(STORED_RELATION_DTO, { min: 0, max: 100 }, ALLOWDUPS),
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
   isPartial: vv.boolean().optional(),
-  state: vv.enum(['partial', 'deleted']).optional(),
+  state: vv.enum(['partial', 'deleted', 'delegate', 'union', 'alias']).optional(),
+  aliasType: RETURN_TYPE_DTO.optional(),
 }).strict(); }
 const STORED_CLASS_DTO: ReturnType<typeof storedClassDto> = storedClassDto();
 function revisionOverloadDto() { return vv.object({ args: ARGS_DTO }).strict(); }
 const REVISION_OVERLOAD_DTO: ReturnType<typeof revisionOverloadDto> = revisionOverloadDto();
 function revisionMemberDto() { return vv.object({
-  name: vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
+  name: z.string().max(1000).regex(/^[\x20-\x7e]*$/),
   overloads: vv.array(REVISION_OVERLOAD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
-}).strict(); }
+  // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
+  rettype: RETURN_TYPE_DTO.optional(),
+}).strict().transform((value) => ({
+  name: value.name,
+  overloads: value.overloads.map((overload) => ({
+    ...overload,
+    args: value.rettype === undefined ? overload.args : [{ arg: '+RET', t: value.rettype }, ...overload.args],
+  })),
+})); }
 const REVISION_MEMBER_DTO: ReturnType<typeof revisionMemberDto> = revisionMemberDto();
 function revisionRelationDto() { return vv.object({
   kind: vv.enum(['OWNS', 'REF', 'UNK']),
-  name: vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
-  target: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  name: z.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
+  member: z.string().max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
+  target: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
   many: vv.boolean(),
 }).strict(); }
 const REVISION_RELATION_DTO: ReturnType<typeof revisionRelationDto> = revisionRelationDto();
 function revisionRenameDto() { return vv.object({
-  from: vv.string().max(100000),
-  to: vv.string().max(100000),
+  from: z.string().max(100000),
+  to: z.string().max(100000),
 }).strict(); }
 const REVISION_RENAME_DTO: ReturnType<typeof revisionRenameDto> = revisionRenameDto();
 function classChangeDto() { return vv.object({
   kind: z.literal('class'),
-  before: vv.enum(['partial', 'deleted', 'complete']),
-  after: vv.enum(['partial', 'deleted', 'complete']),
+  before: vv.enum(['partial', 'deleted', 'delegate', 'union', 'alias', 'complete']),
+  after: vv.enum(['partial', 'deleted', 'delegate', 'union', 'alias', 'complete']),
 }).strict(); }
 const CLASS_CHANGE_DTO: ReturnType<typeof classChangeDto> = classChangeDto();
 function usageChangeDto() { return vv.object({
@@ -101,8 +129,8 @@ function usageChangeDto() { return vv.object({
 }).strict(); }
 const USAGE_CHANGE_DTO: ReturnType<typeof usageChangeDto> = usageChangeDto();
 function sourceValueDto() { return vv.object({
-  sourceFile: vv.string().max(1024),
-  modifiedAt: vv.string().max(100),
+  sourceFile: z.string().max(1024),
+  modifiedAt: z.string().max(100),
 }).strict(); }
 const SOURCE_VALUE_DTO: ReturnType<typeof sourceValueDto> = sourceValueDto();
 function sourceChangeDto() { return vv.object({
@@ -113,8 +141,8 @@ function sourceChangeDto() { return vv.object({
 const SOURCE_CHANGE_DTO: ReturnType<typeof sourceChangeDto> = sourceChangeDto();
 function classRenameDto() { return vv.object({
   kind: z.literal('rename'),
-  before: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
-  after: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  before: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  after: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
 }).strict(); }
 const CLASS_RENAME_DTO: ReturnType<typeof classRenameDto> = classRenameDto();
 function memberChangeDto() { return vv.object({
@@ -135,7 +163,7 @@ const CHANGE_DTO: ReturnType<typeof changeDto> = changeDto();
 function revisionDto() { return vv.object({
   nonCryptoGuid: z.string().uuid().optional(),
   origin: ORIGIN_DTO,
-  when: vv.string().min(1).max(100).default('unknown'),
+  when: z.string().min(1).max(100).default('unknown'),
   changes: vv.array(CHANGE_DTO, { min: 0, max: 201 }, ALLOWDUPS),
 }).strict().transform((value) => {
   const result: ClassRevision = {
@@ -168,6 +196,7 @@ export function parseStoredClassSnapshot(input: unknown, documentId: string = ''
   };
   if (parsed.data.usage) value.usage = parsed.data.usage;
   if (parsed.data.state) value.state = parsed.data.state;
+  if (parsed.data.aliasType !== undefined) value.aliasType = parsed.data.aliasType;
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
   // REMOVE THIS BACKWARD COMPATIBILITY CODE IF NO PROBLEMS FOUND BY 2020/11/23
   else if (parsed.data.isPartial === true) value.state = 'partial';

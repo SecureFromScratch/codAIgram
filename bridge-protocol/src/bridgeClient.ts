@@ -19,6 +19,14 @@ export interface WorkspaceFolder {
 export interface PromptOptions {
     readonly cwd: string;
     readonly workFolders: readonly string[];
+  readonly projectName: string;
+  readonly relatedFile: string;
+  readonly relatedClass: string;
+  readonly relatedMember: string;
+}
+
+export interface BridgeClientTimeoutOptions {
+    readonly chatTimeoutMs: number;
 }
 
 export interface ScanTestCase {
@@ -46,11 +54,13 @@ export interface ScanClassResult {
 export type GetCodeResult = string | readonly string[];
 
 interface BridgeMessage {
+    readonly [field: string]: unknown;
     readonly version?: unknown;
     readonly type?: unknown;
     readonly id?: unknown;
     readonly code?: unknown;
     readonly cause?: unknown;
+    readonly status?: unknown;
     readonly sessionId?: unknown;
     readonly syncTimestamp?: unknown;
     readonly folders?: unknown;
@@ -80,7 +90,8 @@ export class BridgeClient {
     private sessionIdValue: string | undefined;
     private sessionReady: Promise<string>;
     private resolveSession: ((sessionId: string) => void) | undefined;
-    public constructor(connectionUrl: string, origin: string = "https://codai.example", socketFactory: BridgeSocketFactory = browserSocketFactory, private readonly timeoutMs: number = 10_000, sessionId?: string) {
+    private readonly chatTimeoutMs: number;
+    public constructor(connectionUrl: string, origin: string = "https://codai.example", socketFactory: BridgeSocketFactory = browserSocketFactory, private readonly timeoutMs: number = 10_000, sessionIdOrTimeoutOptions?: string | BridgeClientTimeoutOptions) {
         // UNTRUST-ALLOW-UNLOGGED-THROW: URL parsing rejects invalid caller input before any network operation starts.
         const parsed: URL = new URL(connectionUrl);
         if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
@@ -90,6 +101,8 @@ export class BridgeClient {
         this.socketFactory = socketFactory;
         this.connectionOrigin = origin;
         this.connectionHost = `${parsed.protocol}//${parsed.host}`;
+        const sessionId: string | undefined = typeof sessionIdOrTimeoutOptions === "string" ? sessionIdOrTimeoutOptions : undefined;
+        this.chatTimeoutMs = typeof sessionIdOrTimeoutOptions === "object" ? sessionIdOrTimeoutOptions.chatTimeoutMs : 150_000;
         this.sessionReady = this.createSessionPromise();
         const initialUrl: string = sessionId === undefined ? connectionUrl : this.sessionUrl(sessionId);
         this.ready = this.open(initialUrl);
@@ -126,6 +139,14 @@ export class BridgeClient {
             // UNTRUST-ALLOW-UNLOGGED-THROW: Empty work-folder paths are invalid local caller input and are rejected before any bridge request is sent.
             throw new Error("workFolders must be a list of non-empty paths.");
         }
+        if (typeof options.projectName !== "string" || options.projectName.length === 0) {
+            // UNTRUST-ALLOW-UNLOGGED-THROW: A missing project name is invalid local caller input and is rejected before any bridge request is sent.
+            throw new Error("projectName must not be empty.");
+        }
+        if (typeof options.relatedFile !== "string" || typeof options.relatedClass !== "string" || typeof options.relatedMember !== "string") {
+            // UNTRUST-ALLOW-UNLOGGED-THROW: Related source context must be strings; empty strings intentionally represent absent context.
+            throw new Error("relatedFile, relatedClass, and relatedMember must be strings.");
+        }
         await this.ready;
         // UNTRUST-ALLOW-NULLISH: An absent timestamp means no workspace snapshot has been fetched for this connection, so the client must synchronize before sending a chat request.
         if (this.syncTimestamp === undefined) await this.getFolders();
@@ -133,7 +154,8 @@ export class BridgeClient {
         try {
             const response: BridgeMessage = await this.requestChat(prompt, syncTimestamp, options);
             if (response.type !== "chat_response" || typeof response.response !== "string") {
-                // UNTRUST-ALLOW-UNLOGGED-THROW: The malformed response is reported to the caller without exposing payload contents; only a stable validation error is returned.
+                this.logInvalidResponse("chat/ask", response);
+                // UNTRUST-ALLOW-UNLOGGED-THROW: The malformed response details have been logged by the bridge client; callers receive a stable validation error.
                 throw new Error("The bridge returned an invalid AI response.");
             }
             return response.response;
@@ -264,9 +286,13 @@ export class BridgeClient {
             prompt,
             syncTimestamp,
             cwd: options.cwd,
-            workFolders: options.workFolders
+            workFolders: options.workFolders,
+            projectName: options.projectName,
+            relatedFile: options.relatedFile,
+            relatedClass: options.relatedClass,
+            relatedMember: options.relatedMember
         });
-        return this.sendRequest(id, "chat/ask", request);
+        return this.sendRequest(id, "chat/ask", request, this.chatTimeoutMs);
     }
 
     private requestWorkspaceFolders(): Promise<BridgeMessage> {
@@ -287,7 +313,7 @@ export class BridgeClient {
         return this.sendRequest(id, "code/get", request);
     }
 
-    private sendRequest(id: string, operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", text: string): Promise<BridgeMessage> {
+    private sendRequest(id: string, operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", text: string, timeoutMs: number = this.timeoutMs): Promise<BridgeMessage> {
         return new Promise<BridgeMessage>((resolve, reject) => {
             const startedAt: number = Date.now();
             const timeout: ReturnType<typeof setTimeout> = setTimeout(() => {
@@ -296,7 +322,7 @@ export class BridgeClient {
                 this.pending.delete(id);
                 this.logRequestFailure(operation, id, "bridge_response_timeout", Date.now() - startedAt);
                 pending.reject(new Error("The bridge request timed out."));
-            }, this.timeoutMs);
+            }, timeoutMs);
             this.pending.set(id, { operation, startedAt, resolve, reject, timeout });
             console.info(`[${new Date().toISOString()}] Sending request to VS Code bridge.`, {
                 operation,
@@ -338,12 +364,22 @@ export class BridgeClient {
         if (typeof message.id !== "string") return;
         const pending: PendingBridgeClientRequest | undefined = this.pending.get(message.id);
         if (!pending) return;
+        if (pending.operation === "chat/ask" && (message.type === "chat_event" || message.type === "chat_delta")) {
+            console.info(`[${new Date().toISOString()}] VS Code bridge chat progress received.`, {
+                operation: pending.operation,
+                requestId: message.id,
+                endpoint: this.connectionHost,
+                event: message.type === "chat_event" && typeof message.event === "string" ? message.event : message.type,
+                dataJson: JSON.stringify(message.type === "chat_event" ? message.data : message.delta)
+            });
+            return;
+        }
         clearTimeout(pending.timeout);
         this.pending.delete(message.id);
         if (message.type === "error") {
             const errorCode: string = typeof message.code === "string" ? message.code : "bridge_request_failed";
             const errorCause: string = typeof message.cause === "string" ? message.cause : "not provided";
-            this.logRequestFailure(pending.operation, message.id, `${errorCode}; cause=${errorCause}`, Date.now() - pending.startedAt);
+            this.logRequestFailure(pending.operation, message.id, `${errorCode}; cause=${errorCause}`, Date.now() - pending.startedAt, message);
             pending.reject(new Error(errorCause === "not provided" ? errorCode : `${errorCode} (${errorCause})`));
         } else {
             console.info(`[${new Date().toISOString()}] VS Code bridge response received.`, {
@@ -372,14 +408,28 @@ export class BridgeClient {
         this.pending.clear();
     }
 
-    private logRequestFailure(operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", requestId: string, errorCode: string, durationMs: number): void {
+    private logRequestFailure(operation: "workspace_folders" | "chat/ask" | "scan" | "code/get", requestId: string, errorCode: string, durationMs: number, response?: BridgeMessage): void {
         console.error(`[${new Date().toISOString()}] VS Code bridge request failed.`, {
             operation,
             requestId,
             endpoint: this.connectionHost,
             errorCode,
             durationMs,
-            socketReadyState: this.socket.readyState
+            socketReadyState: this.socket.readyState,
+            ...(response === undefined ? {} : {
+                status: response.status ?? "not provided",
+                responseJson: JSON.stringify(response)
+            })
+        });
+    }
+
+    private logInvalidResponse(operation: "chat/ask", response: BridgeMessage): void {
+        console.error(`[${new Date().toISOString()}] VS Code bridge returned an invalid response.`, {
+            operation,
+            requestId: typeof response.id === "string" ? response.id : "not provided",
+            endpoint: this.connectionHost,
+            status: response.status ?? "not provided",
+            responseJson: JSON.stringify(response)
         });
     }
 }

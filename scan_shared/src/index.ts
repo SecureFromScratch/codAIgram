@@ -24,16 +24,26 @@ export interface ScannedClass {
 }
 
 /** Return the source text defining a named class or interface in a requested file. */
-export function getTypeCode(workFolders: readonly string[], filepath: string, typeName: string): string | undefined {
-  return getTypeCodes(workFolders, filepath, typeName)[0];
+export function getTypeCode(workFolders: readonly string[], filepath: string, typeName: string, projectName: string = ""): string | undefined {
+  return getTypeCodes(workFolders, filepath, typeName, projectName)[0];
 }
 
 /** Return source text for every matching declaration across the supplied work folders. */
-export function getTypeCodes(workFolders: readonly string[], filepath: string, typeName: string): readonly string[] {
+export function getTypeCodes(workFolders: readonly string[], filepath: string, typeName: string, projectName: string = ""): readonly string[] {
   if (filepath.split(/[\\/]/u).includes("..")) return [];
-  const candidates: readonly string[] = path.isAbsolute(filepath)
-    ? [path.resolve(filepath)]
-    : workFolders.map((folder: string) => path.resolve(folder, filepath));
+  const candidates: string[] = [];
+  if (path.isAbsolute(filepath)) {
+    candidates.push(path.resolve(filepath));
+  } else {
+    workFolders.forEach((folder: string) => {
+      candidates.push(path.resolve(folder, filepath));
+      if (projectName.length === 0 || !fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return;
+      const projectDirectories: readonly fs.Dirent[] = fs.readdirSync(folder, { withFileTypes: true });
+      projectDirectories
+        .filter((entry: fs.Dirent) => entry.isDirectory() && entry.name.toLowerCase() === projectName.toLowerCase())
+        .forEach((entry: fs.Dirent) => candidates.push(path.resolve(folder, entry.name, filepath)));
+    });
+  }
   const matches: string[] = [];
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;

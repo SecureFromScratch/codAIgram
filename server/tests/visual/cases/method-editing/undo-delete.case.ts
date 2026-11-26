@@ -43,9 +43,9 @@ export function registerUndoDeleteMethodCase(): void {
     );
     await page.keyboard.press("Backspace");
     await waitForMethodNames("ClassDiagram", [
-      "addPartialClass",
-      "connectClasses",
-      "recalcLayout",
+      "addPartialClass()",
+      "connectClasses()",
+      "recalcLayout()",
     ]);
     await page.keyboard.press("Control+z");
     await page.waitForFunction(
@@ -56,10 +56,10 @@ export function registerUndoDeleteMethodCase(): void {
       text,
     );
     await waitForMethodNames("ClassDiagram", [
-      "addClass",
-      "addPartialClass",
-      "connectClasses",
-      "recalcLayout",
+      "addClass()",
+      "addPartialClass()",
+      "connectClasses()",
+      "recalcLayout()",
     ]);
     const restored: Locator = page.locator(
       '[data-class-name="ClassDiagram"] [data-method-index="0"]',
@@ -79,7 +79,7 @@ export function registerUndoDeleteMethodCase(): void {
       const __partValues: readonly string[] = [
         "addClass(name, publicMethods)",
         "name: string",
-        "publicMethods: ✏️string[]",
+        "-publicMethods: ✏️string[]",
       ];
       for (
         let __partIndex: number = 0;

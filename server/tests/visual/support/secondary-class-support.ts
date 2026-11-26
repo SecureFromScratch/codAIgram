@@ -21,7 +21,7 @@ export const SECONDARY_CLASSES: readonly SecondaryClassFixtureT[] = [
     name: "ModificationHistory",
     source:
       "ModificationHistory\n  modifications: Modification[]\n  push(newModification: Modification)\n  compact(maxModsToKeep: positive)",
-    members: ["modifications: Modification[]", "push", "compact"],
+    members: ["modifications: Modification[]", "push()", "compact()"],
   },
 ];
 export function getSecondaryClassFixture(name: string): SecondaryClassFixtureT {

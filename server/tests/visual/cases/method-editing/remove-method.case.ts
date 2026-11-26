@@ -24,6 +24,6 @@ export function registerRemoveMethodCase(): void {
     const { editor, text }: Awaited<ReturnType<typeof resetOwnershipEditor>> =
       await resetOwnershipEditor();
     await editor.fill(text.replace("  addPartialClass(name: string)\n", ""));
-    await waitForMethodNames("ClassDiagram", ["addClass", "connectClasses", "recalcLayout"]);
+    await waitForMethodNames("ClassDiagram", ["addClass()", "connectClasses()", "recalcLayout()"]);
   });
 }

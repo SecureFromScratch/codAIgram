@@ -12,6 +12,7 @@ export const TEST_CASE_METADATA: {
     availability: 'available',
     history: [
       { when: '2026/11/25 00:00', text: 'Add a visual test: choosing Ask about... from a class member context menu opens chat and displays “Ask about <member> in <class>” in the chat heading.' },
+      { when: '2026/11/25 00:00', text: 'Update the Ask about member visual test: verify both the member name and class name in the chat heading are italicized.' },
     ],
   },
 };
@@ -37,5 +38,9 @@ export function registerAskAboutMemberHeaderCase(): void {
     const heading: Locator = chat.getByRole('heading', { name: 'Ask about execute in AskHeaderClass' });
     await heading.waitFor();
     assert.equal(await heading.innerText(), 'Ask about execute in AskHeaderClass');
+    const italicizedNames: Locator = heading.locator('em');
+    assert.equal(await italicizedNames.count(), 2);
+    assert.equal(await italicizedNames.nth(0).innerText(), 'execute');
+    assert.equal(await italicizedNames.nth(1).innerText(), 'AskHeaderClass');
   });
 }

@@ -42,6 +42,7 @@ import { registerWorkspaceSyncIntegration } from "./extension.workspace-sync.tes
 import { registerBridgeClientConnectCase } from "./extension.bridge-client-connect.case";
 import { registerBridgeClientFoldersCase } from "./extension.bridge-client-folders.case";
 import { registerBridgeClientPromptCase } from "./extension.bridge-client-prompt.case";
+import { registerAskAboutPromptCase } from "./askAboutPrompt.case";
 import { registerSessionReconnectCase } from "./extension.session-reconnect.case";
 import { registerWorkspaceAgentsCase } from "./workspaceAgents.case";
 
@@ -169,6 +170,7 @@ if (scenario === "shutdown") {
         registerBridgeClientConnectCase(() => api, trustedOrigin);
         registerBridgeClientFoldersCase(() => api, trustedOrigin);
         registerBridgeClientPromptCase(() => api, trustedOrigin);
+        registerAskAboutPromptCase();
         registerSessionReconnectCase(() => api, trustedOrigin);
         registerWorkspaceAgentsCase(() => api);
 

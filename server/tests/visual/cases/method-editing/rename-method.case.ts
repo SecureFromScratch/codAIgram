@@ -25,10 +25,10 @@ export function registerRenameMethodCase(): void {
       await resetOwnershipEditor();
     await editor.fill(text.replace("addPartialClass", "createPartialClass"));
     await waitForMethodNames("ClassDiagram", [
-      "addClass",
-      "createPartialClass",
-      "connectClasses",
-      "recalcLayout",
+      "addClass()",
+      "createPartialClass()",
+      "connectClasses()",
+      "recalcLayout()",
     ]);
   });
 }

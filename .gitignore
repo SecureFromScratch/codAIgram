@@ -3,6 +3,8 @@ dist/
 dist-tests/
 dist-types/
 .artifacts/
+.vscode-test/
+.npm-cache/
 package-lock.json
 *.tsbuildinfo
 firebase-debug.log

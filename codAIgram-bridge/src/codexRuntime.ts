@@ -38,6 +38,8 @@ export interface CodexPromptOptions {
 }
 
 export class CodexRuntime {
+  public constructor(private readonly additionalCodexSearchDirectories: readonly string[] = []) {}
+
   private child: ChildProcess | undefined;
   private health: CodexProcessHealth | undefined;
   private client: CodexJsonRpcClient | undefined;
@@ -50,7 +52,7 @@ export class CodexRuntime {
     if (this.child) return err("already_running");
     const directory: Awaited<ReturnType<typeof resolveLaunchDirectory>> = typeof options.cwd === "string" ? await resolveLaunchDirectoryFor(options.cwd) : await resolveLaunchDirectory();
     if (directory.isErr()) return err(directory.error);
-    const executable: Awaited<ReturnType<typeof discoverCodexExecutable>> = await discoverCodexExecutable();
+    const executable: Awaited<ReturnType<typeof discoverCodexExecutable>> = await discoverCodexExecutable(this.additionalCodexSearchDirectories);
     if (executable.isErr()) return err(executable.error);
     const started: Awaited<ReturnType<typeof startCodexAppServer>> = await startCodexAppServer(executable.value, directory.value, clientInfo);
     if (started.isErr()) return err(started.error);

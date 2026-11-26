@@ -100,7 +100,7 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
             if (!validOptions) {
               client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "prompt_options_mismatch" }));
             } else {
-              client.send(JSON.stringify({ version: 1, type: "chat_response", id: request.id, response: match.response }));
+              sendSyntheticChatResponse(client, request.id, match.response);
             }
           } else {
             client.send(JSON.stringify({ version: 1, type: "error", id: request.id, code: "prompt_not_found", status: 500 }));
@@ -131,4 +131,23 @@ export async function startMock(config: MockConfig): Promise<http.Server> {
   if (!address || typeof address === "string") throw new Error("Mock listener did not expose an address.");
   process.stdout.write(`CodAIgram Bridge mock listening on ws://${HOST}:${address.port}\n`);
   return httpServer;
+}
+
+function sendSyntheticChatResponse(client: WebSocket, requestId: string, response: string): void {
+  const threadId: string = `mock-thread-${requestId}`;
+  client.send(JSON.stringify({
+    version: 1,
+    type: "chat_event",
+    id: requestId,
+    event: "thread/status/changed",
+    data: { threadId, status: { type: "active", activeFlags: [] } }
+  }));
+
+  const responseCharacters: readonly string[] = Array.from(response);
+  for (let index: number = 0; index < responseCharacters.length; index += 4) {
+    const delta: string = responseCharacters.slice(index, index + 4).join("");
+    client.send(JSON.stringify({ version: 1, type: "chat_delta", id: requestId, delta }));
+  }
+
+  client.send(JSON.stringify({ version: 1, type: "chat_response", id: requestId, response }));
 }

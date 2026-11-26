@@ -163,7 +163,7 @@ export function registerTextEllipsisCase(): void {
   test(TEST_CASE_METADATA.title, async () => {
     await verifyText(
       "ClassDiagram",
-      ["addClass", "addPartialClass", "connectClasses", "recalcLayout"],
+      ["addClass()", "addPartialClass()", "connectClasses()", "recalcLayout()"],
       "Class",
     );
     const heading: string =
@@ -191,7 +191,7 @@ export function registerTextEllipsisCase(): void {
     );
     await verifyText(
       heading,
-      ["anExtremelyLongMethodNameWithArguments"],
+      ["anExtremelyLongMethodNameWithArguments()"],
       target,
     );
   });

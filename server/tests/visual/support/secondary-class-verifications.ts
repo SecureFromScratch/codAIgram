@@ -85,6 +85,7 @@ export async function verifySecondaryClassStructure(
         row.text === expected ||
           ((row.text ?? "").endsWith("…") &&
             expected.startsWith((row.text ?? "").slice(0, -1))),
+        `Expected class member ${JSON.stringify(expected)}, received ${JSON.stringify(row.text)}.`,
       );
       assert.ok(
         row.rect.left >= geometry.body.left &&

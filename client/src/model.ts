@@ -16,7 +16,9 @@ export interface Relation {
 export interface Diagram {
   title: string;
   members: string[];
+  state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
   memberStatuses?: ('normal' | 'changed' | 'deleted')[];
+  unionPanels?: { type: string; aliasExpansion?: string }[];
   targets: Relation[];
   classes?: Diagram[];
 }
@@ -40,6 +42,7 @@ function hasValidGenericBrackets(type: string): boolean {
       depth++;
     } else if (character === '>') {
       const previous: string = type.charAt(index - 1);
+      if (previous === '=') continue;
       if (depth === 0 || !/[A-Za-z0-9_>'"\]]/.test(previous)) return false;
       depth--;
     }
@@ -85,11 +88,11 @@ export function parseDiagram(text: string): ParseResultT {
   }
   const first: Diagram | undefined = classes.at(0);
   if (!first) return { ok: false, message: 'Start with a class name.' };
-  const diagram: Diagram = classes.length > 1 ? {
-    title: first.title,
-    members: first.members,
-    targets: first.targets,
-    classes: classes.slice(1) } : first;
+  const diagram: Diagram = first;
+  if (classes.length > 1) {
+    diagram.classes = classes.slice(1);
+    if (first.state) diagram.state = first.state;
+  }
   return failure && !failure.ok ? {
     ok: false,
     message: failure.message,
@@ -132,6 +135,20 @@ function parseClass(text: string): ParseResultT {
       else return {
         ok: false,
         message: 'Expected OWNS, REF, or UNK relationship.' };
+    } else if (/^(?:@delegate)?\(.*\)(?:\s*=>\s*\S.*)?$/.test(line)) {
+      if (relationshipsStarted) return {
+        ok: false,
+        message: 'Properties and methods must precede relationships.' };
+      if (!/^ {2}/.test(rawLine)) return { ok: false, message: 'Indent methods exactly two spaces.' };
+      const signatureSeparator: number = line.lastIndexOf(') => ');
+      const delegatePrefix: boolean = line.startsWith('@delegate(');
+      const argumentStart: number = delegatePrefix ? '@delegate('.length : 1;
+      const argumentText: string = signatureSeparator >= 0 ? line.slice(argumentStart, signatureSeparator) : line.slice(argumentStart, -1);
+      const returnType: string = signatureSeparator >= 0 ? line.slice(signatureSeparator + 5) : '';
+      if (returnType && !hasValidGenericBrackets(returnType) || !('parameters' in formatMember(`delegate(${argumentText})`))) return {
+        ok: false,
+        message: 'Expected a valid delegate signature.' };
+      members.push(delegatePrefix ? `@delegate(${argumentText})${returnType ? ` => ${returnType}` : ''}` : `(${argumentText})${returnType ? ` => ${returnType}` : ''}`);
     } else if (/^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)) {
       if (relationshipsStarted) return {
         ok: false,
@@ -150,7 +167,10 @@ function parseClass(text: string): ParseResultT {
         depth += (part.match(/\(/g) ?? []).length - (part.match(/\)/g) ?? []).length;
       }
       if (depth !== 0) return { ok: false, message: 'Complete the method signature.' };
-      if (!('parameters' in formatMember(method))) return {
+      const methodReturnSeparator: number = method.lastIndexOf(') => ');
+      const methodParameters: string = methodReturnSeparator >= 0 ? method.slice(0, methodReturnSeparator + 1) : method;
+      const methodReturnType: string = methodReturnSeparator >= 0 ? method.slice(methodReturnSeparator + 5) : '';
+      if (methodReturnType && !hasValidGenericBrackets(methodReturnType) || !('parameters' in formatMember(methodParameters))) return {
         ok: false,
         message: 'Expected method parameters as name: type.' };
       members.push(method);
@@ -175,5 +195,8 @@ function parseClass(text: string): ParseResultT {
     message: relationError,
     diagram: { title, members, targets },
     partialRetention };
-  return { ok: true, diagram: { title, members, targets } };
+  const isDelegate: boolean = members.length > 0 && members.every((member: string) => member.startsWith('@delegate('));
+  const diagram: Diagram = { title, members, targets };
+  if (isDelegate) diagram.state = 'delegate';
+  return { ok: true, diagram };
 }

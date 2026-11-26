@@ -162,6 +162,7 @@ export function registerVisualLifecycle(): void {
     logVisualEvent("INFO", `Starting test: ${context.name}`);
     await page.evaluate(() => {
       window.localStorage.removeItem("codaigram.editorPercent");
+      window.localStorage.removeItem("codaigram.selectedProject");
       window.localStorage.removeItem("codaigram.vscodeBridgeSession");
     });
     await setVisualClasses(VISUAL_CLASSES);

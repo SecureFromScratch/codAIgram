@@ -4,7 +4,8 @@ export class Task {
   readonly contract: TaskContract;
   children: ChildTask[];
   assignees: Queue<AssigneeContract>;
-  private internalCode: string;
+  protected hiddenChildren: ChildTask[];
+  private internalCode: TaskContract;
 
   assign(assignee: AssigneeContract, urgent: boolean): void {}
 

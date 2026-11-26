@@ -99,8 +99,8 @@ export async function runLiveChatResponseScenario(): Promise<void> {
     const response: Locator = chat.locator('[data-chat-role="assistant"]').last();
     const chatError: Locator = chat.getByRole('alert');
     const promptOutcome: LivePromptOutcomeT = await Promise.race([
-      response.waitFor({ state: 'visible', timeout: 120_000 }).then(() => 'response' as const),
-      chatError.waitFor({ state: 'visible', timeout: 120_000 }).then(() => 'error' as const),
+      response.waitFor({ state: 'visible', timeout: 155_000 }).then(() => 'response' as const),
+      chatError.waitFor({ state: 'visible', timeout: 155_000 }).then(() => 'error' as const),
     ]);
     if (promptOutcome === 'error') logAndThrow(new Error(`The live Codex request failed: ${(await chatError.innerText()).trim()}`));
     const actualResponse: string = (await response.textContent())?.trim() ?? '';

@@ -17,6 +17,7 @@ export const TEST_CASE_METADATA: {
       { when: '2026/11/15 23:42', text: 'add visual test: attributes that are NOT readonly have a pen/pencil (or similar) emoji prefixing them\nthe same is true for moutable method args in overloads (note that string is NOT mutable ever, neither is number afaik)' },
       { when: '2026/11/16 00:00', text: "I don't see these tests: add visual test: attributes that are NOT readonly have a pen/pencil (or similar) emoji prefixing them the same is true for moutable method args in overloads (note that string is NOT mutable ever, neither is number afaik)" },
       { when: '2026/11/16 12:30', text: "adjust visual tests regarding having pencil before class member - the pencil should be before the type, no space between it and the type, cancel attribute's indentation." },
+      { when: '2026/11/25', text: 'Classbox members put the pencil before the member name; tooltip arguments put it immediately before the type.' },
     ],
   },
 };
@@ -48,19 +49,22 @@ export function registerMutableMembersCase(): void {
     await page.reload();
     const box: Locator = page.locator('[data-class-name="Example"]');
     await box.waitFor();
-    const text: string = await box.locator('text[joint-selector="bodyText"]').textContent() ?? '';
-    assert.match(text, /editable: ✏️string/);
-    assert.doesNotMatch(text, /✏️\s*editable|fixed: ✏️/);
-    const editable: Locator = box.locator('[data-method-tooltip^="editable:"]');
-    assert.equal(await editable.textContent(), 'editable: ✏️string');
+    const renderedRows: string[] = await box.locator('text[joint-selector="bodyText"] tspan').allTextContents();
+    assert.ok(renderedRows.some((row: string) => row.trim() === '✏️editable: string'));
+    assert.ok(renderedRows.some((row: string) => row.trim() === 'fixed: string'));
+    assert.ok(renderedRows.every((row: string) => !row.includes('✏️') || /^\s*✏️/u.test(row)));
+    const editable: Locator = box.locator('[data-method-tooltip*="editable:"]');
+    assert.match(await editable.textContent() ?? '', /^\s*✏️editable: string$/u);
     const methods: Locator = box.locator('[data-method-tooltip^="run("]');
     await methods.nth(0).hover();
-    let tooltip: string = await page.getByRole('tooltip').innerText();
-    assert.match(tooltip, /✏️string\[\]/);
-    assert.doesNotMatch(tooltip, /✏️\s*names|✏️string\b(?!\[)/);
+    let tooltip: Locator = page.getByRole('tooltip');
+    const firstArgumentLines: string[] = await tooltip.locator('.tooltip-parameter').allTextContents();
+    assert.ok(firstArgumentLines.includes('-names: ✏️string[]'));
+    assert.ok(firstArgumentLines.every((line: string) => !line.includes('✏️') || /: ✏️/u.test(line)));
     await methods.nth(1).hover();
-    tooltip = await page.getByRole('tooltip').innerText();
-    assert.match(tooltip, /✏️Widget/);
-    assert.doesNotMatch(tooltip, /✏️\s*(?:widget|values)|✏️string\[\]/);
+    tooltip = page.getByRole('tooltip');
+    const secondArgumentLines: string[] = await tooltip.locator('.tooltip-parameter').allTextContents();
+    assert.ok(secondArgumentLines.includes('-widget: ✏️Widget'));
+    assert.ok(secondArgumentLines.every((line: string) => !line.includes('✏️') || /: ✏️/u.test(line)));
   });
 }

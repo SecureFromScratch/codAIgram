@@ -53,7 +53,7 @@ export function registerMethodTooltipArgumentsCase(): void {
         "addClass(label, option, items)",
         "label: number",
         "option: boolean",
-        "items: ✏️Item[]",
+        "-items: ✏️Item[]",
       ];
       for (
         let __partIndex: number = 0;

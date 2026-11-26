@@ -1,6 +1,7 @@
 {
   "name": "@codaigram/bridge-protocol",
   "version": "0.0.1",
+  "type": "module",
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +20,7 @@
   },
   "dependencies": {
     "@untrust/mandate-core": "file:../../mandate/packages/core",
-    "@untrust/vv": "file:../../vv_ts/packages/vv",
+    "@untrust/vv": "file:../../mandate/.artifacts/untrust-vv-0.1.16.tgz",
     "neverthrow": "^8.2.0"
   }
 }

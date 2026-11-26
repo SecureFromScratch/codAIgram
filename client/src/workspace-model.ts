@@ -16,6 +16,28 @@ type ModelListenerT = {
 
 type InitializationStateT = 'uninitialized' | 'initialized';
 
+function formatDelegateArguments(text: string): ArgsListT {
+  if (!text.trim()) return [];
+  const parts: string[] = [];
+  let depth: number = 0;
+  let start: number = 0;
+  for (let index: number = 0; index < text.length; index += 1) {
+    const character: string = text.charAt(index);
+    if (character === '<' || character === '[' || character === '(' || character === '{') depth += 1;
+    if (character === '>' || character === ']' || character === ')' || character === '}') depth -= 1;
+    if (character === ',' && depth === 0) { parts.push(text.slice(start, index)); start = index + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part: string) => {
+    const separator: number = part.indexOf(':');
+    if (separator < 0) return { arg: '', t: '' };
+    return {
+      arg: part.slice(0, separator).trim(),
+      t: part.slice(separator + 1).trim(),
+    };
+  });
+}
+
 function sameValue(left: unknown, right: unknown): boolean {
   // UNTRUST-ALLOW-NULLISH: An omitted optional field is represented internally as undefined; compare that absence explicitly before JSON serialization loses it.
   if (left === undefined || right === undefined) return left === right;
@@ -168,12 +190,28 @@ export class ClassWorkspaceModel {
     if (!parsed.ok) return new Error(parsed.message);
     const diagram: Diagram = parsed.diagram;
     if (diagram.classes?.length) return new Error('Parse one class definition at a time.');
-    const methods: ClassDetails['methods'] = diagram.members.map((member: string) => {
+    const isDelegate: boolean = diagram.state === 'delegate';
+    const parsedMethods: ClassDetails['methods'] = isDelegate ? [{
+      name: '',
+      overloads: diagram.members.map((member: string) => {
+        const signature: RegExpMatchArray | null = member.match(/^@delegate\((.*)\)(?:\s*=>\s*(.+))?$/);
+        const returnType: string = signature?.[2] ?? '';
+        return [...(returnType ? [{ arg: '+RET', t: returnType }] : []), ...formatDelegateArguments(signature?.[1] ?? '')];
+      }),
+    }] : diagram.members.map((member: string) => {
+        const callSignature: RegExpMatchArray | null = member.match(/^(@delegate)?\((.*)\)(?:\s*=>\s*(.+))?$/);
+        if (callSignature) {
+          const returnType: string = callSignature[3] ?? '';
+          return {
+            name: '',
+            overloads: [[...(returnType ? [{ arg: '+RET', t: returnType }] : []), ...formatDelegateArguments(callSignature[2] ?? '')]],
+          };
+        }
         // UNTRUST-ALLOW-NULLISH: This regex is only a method parse probe; null means interpret the row as a property, and later validation rejects malformed content.
-        const method: RegExpMatchArray | null = member.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/);
+        const method: RegExpMatchArray | null = member.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\((.*)\)(?:\s*=>\s*(.+))?$/);
         if (method) return {
           name: method[1] ?? '',
-          overloads: [[...(method[2] ?? '').split(',').filter(Boolean).map((part: string) => {
+          overloads: [[...(method[3] ? [{ arg: '+RET', t: method[3] }] : []), ...(method[2] ?? '').split(',').filter(Boolean).map((part: string) => {
             // UNTRUST-ALLOW-NULLISH: This regex is an argument parse probe; null yields empty fields that schema validation rejects before the model accepts the class.
             const field: RegExpMatchArray | null = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/);
             return { arg: field?.[1] ?? '', t: field?.[2] ?? '' };
@@ -188,6 +226,12 @@ export class ClassWorkspaceModel {
           overloads: [[{ arg: '+RO', t: propertyType }]],
         };
       });
+    const methods: ClassDetails['methods'] = [];
+    parsedMethods.forEach((member: ClassMember) => {
+      const existing: ClassMember | undefined = methods.find((candidate: ClassMember) => candidate.name === member.name);
+      if (existing) existing.overloads.push(...member.overloads);
+      else methods.push(member);
+    });
     const relations: ClassDetails['relations'] = diagram.targets.map((relation) => ({
       kind: relation.kind,
       name: relation.name,
@@ -195,7 +239,8 @@ export class ClassWorkspaceModel {
       many: relation.multiplicity === 'many',
     }));
     const value: ClassDetails = { name: diagram.title, methods, relations };
-    if (methods.length === 0 && relations.length === 0) value.state = 'partial';
+    if (isDelegate) value.state = 'delegate';
+    else if (methods.length === 0 && relations.length === 0) value.state = 'partial';
     return isClassDetails(value) ? value : new Error('Parsed class is invalid.');
   }
 
@@ -229,15 +274,20 @@ export class Model {
   static parse(classDesc: string): ClassDetails | Error { return ClassWorkspaceModel.parse(classDesc); }
 
   static decompile(model: ClassDetails): string {
-    const members: string[] = model.methods.flatMap(Model.#memberToDslLines);
+    const members: string[] = model.methods.flatMap((member: ClassMember) => Model.#memberToDslLines(member, model.state === 'delegate'));
     const relations: string[] = model.relations.map((relation: ClassDetails['relations'][number]) => `${relation.kind} ${relation.name}: ${relation.target}${relation.many ? '[]' : ''}`);
     return [model.name, ...members, ...relations].join('\n');
   }
 
-  static #memberToDslLines(member: ClassMember): readonly string[] {
-    const field: FieldType | undefined = member.overloads.at(0)?.at(0);
-    if (field?.arg.startsWith('+')) return [`  ${member.name}: ${Model.#typeToDsl(field.t)}`];
-    return member.overloads.map((overload: ArgsListT) => `  ${member.name}(${overload.map((argument: FieldType) => `${argument.arg}: ${Model.#typeToDsl(argument.t)}`).join(', ')})`);
+  static #memberToDslLines(member: ClassMember, isDelegate: boolean = false): readonly string[] {
+    return member.overloads.map((overload: ArgsListT) => {
+      const marker: FieldType | undefined = overload.at(0);
+      if (marker?.arg === '+RO' || marker?.arg === '+RW' || marker?.arg === '+GET' || marker?.arg === '+SET' || marker?.arg === '+PROP') return `  ${member.name}: ${Model.#typeToDsl(marker.t)}`;
+      const returnType: FieldType | undefined = marker?.arg === '+RET' ? marker : undefined;
+      const parameters: ArgsListT = returnType ? overload.slice(1) : overload;
+      const callable: string = `  ${member.name ? `${member.name}` : isDelegate ? '@delegate' : ''}(${parameters.map((argument: FieldType) => `${argument.arg}: ${Model.#typeToDsl(argument.t)}`).join(', ')})`;
+      return returnType ? `${callable} => ${Model.#typeToDsl(returnType.t)}` : callable;
+    });
   }
 
   static #typeToDsl(type: CompositeTypeT): string {

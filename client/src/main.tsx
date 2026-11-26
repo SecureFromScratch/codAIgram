@@ -1,11 +1,12 @@
 /// <reference types="vite/client" />
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { EditorState, Transaction } from '@codemirror/state';
 import { history, historyKeymap } from '@codemirror/commands';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { dia, shapes } from '@joint/core';
 import type { Result } from 'neverthrow';
+import type { CompositeTypeT } from '@codaigram/shared/class-types';
 import { parseDiagram, type Diagram, type ParseResultT, type Relation } from './model';
 import { classDetailsToDiagram, classDetailsToDiagramSet, loadClassDetails, type ClassDetails } from './class-details';
 import { formatMember, type MemberDisplay, type Parameter } from './signatures';
@@ -26,6 +27,8 @@ window.logAndThrow = logAndThrow;
 
 type ClassContextMenuT = { status: 'closed' } | { status: 'open'; className: string; x: number; y: number; memberTooltip?: string; showActualCode?: boolean };
 type ChatPanelStateT = 'open' | 'closed';
+type RelatedPromptContextT = { readonly relatedFile: string; readonly relatedClass: string; readonly relatedMember: string };
+const EMPTY_RELATED_PROMPT_CONTEXT: RelatedPromptContextT = { relatedFile: '', relatedClass: '', relatedMember: '' };
 type NewProjectDialogStatusT = 'open' | 'closed';
 type ProjectSettingsDialogStatusT = 'open' | 'closed';
 type BridgeConnectionStatusT = 'connected' | 'disconnected';
@@ -77,6 +80,41 @@ function saveVscodeWorkspaceSelection(uris: readonly string[]): void {
   } catch (error: unknown) {
     console.warn('Could not save VS Code workspace selections.', error);
   }
+}
+
+function loadSavedProjectName(): string | undefined {
+  const storedProject: AppStorageReadT = readAppStorageValue('selectedProject');
+  if (storedProject.state !== 'present' || !/^[A-Za-z0-9_-]{1,100}$/u.test(storedProject.value)) return undefined;
+  return storedProject.value;
+}
+
+function saveSelectedProjectName(projectName: string): void {
+  try {
+    writeAppStorageValue('selectedProject', projectName);
+  } catch (error: unknown) {
+    console.warn('Could not save the selected project.', error);
+  }
+}
+
+function actualCodeIndentUnit(lines: readonly string[]): number {
+  const openingBraceLine: number = lines.findIndex((line: string) => line.includes('{'));
+  if (openingBraceLine < 0) return 3;
+  const firstIndentedLine: string | undefined = lines.slice(openingBraceLine + 1).find((line: string) => line.trim().length > 0);
+  if (firstIndentedLine === undefined) return 3;
+  return /^[ ]*/u.exec(firstIndentedLine)?.[0].length || 3;
+}
+
+function actualCodeMarkup(source: string): React.ReactNode {
+  const lines: readonly string[] = source.split(/\r?\n/u);
+  const indentUnit: number = actualCodeIndentUnit(lines);
+  return lines.map((line: string, index: number) => {
+    const lineIndent: number = /^[ ]*/u.exec(line)?.[0].length ?? 0;
+    const continuationIndent: number = lineIndent + indentUnit;
+    return <Fragment key={index}>{index > 0 ? '\n' : ''}<span
+      className="actual-code-line"
+      style={{ paddingLeft: `${continuationIndent}ch`, textIndent: `-${continuationIndent}ch` }}
+    >{line}</span></Fragment>;
+  });
 }
 
 type WorkspaceSelectionModeT = 'none' | 'agent' | 'folder';
@@ -220,6 +258,38 @@ type ClassTooltipStateT = { visible: false } | {
 
 function argumentColor(index: number): string { return `hsl(${(index * 137.508) % 360} 85% 78%)`; }
 
+function compositeTypeText(type: CompositeTypeT): string {
+  if (typeof type === 'string') return type;
+  if (Array.isArray(type)) return type.map((value: string) => `'${value}'`).join(' | ');
+  return `{ ${Array.from(type.entries(), ([name, value]: [string, CompositeTypeT]) => `${name}: ${compositeTypeText(value)}`).join(', ')} }`;
+}
+
+const GRAPH_TYPE_EXCLUSIONS: ReadonlySet<string> = new Set<string>([
+  'string', 'number', 'boolean', 'bigint', 'symbol', 'undefined', 'null', 'void', 'never', 'unknown', 'any', 'object',
+  'integer', 'positive', 'datetime', 'Array', 'ReadonlyArray', 'Promise', 'Map', 'ReadonlyMap', 'Set', 'ReadonlySet',
+  'WeakMap', 'WeakSet', 'Record', 'Partial', 'Required', 'Readonly', 'Pick', 'Omit', 'Exclude', 'Extract',
+  'NonNullable', 'ReturnType', 'Parameters', 'ConstructorParameters', 'InstanceType', 'ThisType', 'Awaited',
+  'Date', 'RegExp', 'Error', 'Function', 'Object', 'String', 'Number', 'Boolean', 'keyof', 'typeof', 'infer',
+  'extends', 'readonly', 'new', 'this', 'true', 'false',
+]);
+
+function graphTypeIdentifiers(type: CompositeTypeT): string[] {
+  if (typeof type === 'string') return Array.from(type.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/gu), (match: RegExpMatchArray) => match[0]).filter((name: string) => !GRAPH_TYPE_EXCLUSIONS.has(name));
+  if (Array.isArray(type)) return [];
+  return Array.from(type.values()).flatMap(graphTypeIdentifiers);
+}
+
+function graphClassTargets(name: string, visited: ReadonlySet<string> = new Set<string>()): string[] {
+  if (visited.has(name)) return [];
+  const model: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+  if (!model.isOk() || model.value.state === 'deleted') return model.isOk() ? [] : [name];
+  if (model.value.state !== 'alias') return [name];
+  if (model.value.aliasType === undefined) return [];
+  const nextVisited: Set<string> = new Set<string>(visited);
+  nextVisited.add(name);
+  return graphTypeIdentifiers(model.value.aliasType).flatMap((target: string) => graphClassTargets(target, nextVisited));
+}
+
 function MethodTooltip({ member, left, top, anchorTop }: {
   member: MemberDisplay;
   left: number;
@@ -243,7 +313,7 @@ function MethodTooltip({ member, left, top, anchorTop }: {
     element.style.left = `${Math.max(minLeft, Math.min(left, maxRight - bounds.width))}px`;
   }, [member, left, top, anchorTop]);
   return <div id="method-tooltip" ref={tooltipRef} role="tooltip" className="method-tooltip" style={{ left, top }}>
-    {member.parameters ? <><div className="tooltip-signature"><strong>{member.text}</strong><span className="tooltip-paren">(</span>{parameters.map((parameter: Parameter, index: number) => <span key={`${index}-${parameter.name}`}><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span>{index + 1 < parameters.length ? <span className="tooltip-punctuation">, </span> : ''}</span>)}<span className="tooltip-paren">)</span></div>{parameters.length > 0 ? <div className="tooltip-parameters">{parameters.map((parameter: Parameter, index: number) => <div className="tooltip-parameter" key={`${index}-${parameter.name}`}><span className="tooltip-dash">-</span><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span><span className="tooltip-punctuation">: </span><span className="tooltip-type">{parameter.type}</span></div>)}</div> : ''}</> : <div className="tooltip-signature">{member.tooltip}</div>}
+    {member.parameters ? <><div className="tooltip-signature"><strong>{member.text.replace(/\(\)$/u, '')}</strong><span className="tooltip-paren">(</span>{parameters.map((parameter: Parameter, index: number) => <span key={`${index}-${parameter.name}`}><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span>{index + 1 < parameters.length ? <span className="tooltip-punctuation">, </span> : ''}</span>)}<span className="tooltip-paren">)</span></div>{parameters.length > 0 ? <div className="tooltip-parameters">{parameters.map((parameter: Parameter, index: number) => <Fragment key={`${index}-${parameter.name}`}><div className="tooltip-parameter"><span className="tooltip-dash">-</span><span className={`argument-color-${index}`} style={{ color: argumentColor(index) }}>{parameter.name}</span><span className="tooltip-punctuation">: </span><span className="tooltip-type">{parameter.type}</span></div>{parameter.aliasExpansion ? <div className="tooltip-parameter-expansion">{parameter.aliasExpansion.trimStart()}</div> : ''}</Fragment>)}</div> : ''}</> : <div className="tooltip-signature">{member.tooltip}</div>}
   </div>;
 }
 
@@ -259,7 +329,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
   const [tooltip, setTooltip]: [TooltipStateT, React.Dispatch<React.SetStateAction<TooltipStateT>>] = useState<TooltipStateT>({ visible: false });
   const [classTooltip, setClassTooltip]: [ClassTooltipStateT, React.Dispatch<React.SetStateAction<ClassTooltipStateT>>] = useState<ClassTooltipStateT>({ visible: false });
   const [contextMenu, setContextMenu]: [ClassContextMenuT, React.Dispatch<React.SetStateAction<ClassContextMenuT>>] = useState<ClassContextMenuT>({ status: 'closed' });
-  const [actualCodeClasses, setActualCodeClasses]: [ReadonlySet<string>, React.Dispatch<React.SetStateAction<ReadonlySet<string>>>] = useState<ReadonlySet<string>>(new Set<string>());
+  const [showActualCode, setShowActualCode]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
   const [actualCodeCache, setActualCodeCache]: [ReadonlyMap<string, string>, React.Dispatch<React.SetStateAction<ReadonlyMap<string, string>>>] = useState<ReadonlyMap<string, string>>(new Map<string, string>());
   const actualCodeRequests: React.RefObject<Set<string>> = useRef<Set<string>>(new Set<string>());
   // UNTRUST-ALLOW-NULLISH: React initializes DOM refs as null before mounting and clears them on unmount; this boundary is checked before any DOM access.
@@ -285,10 +355,47 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     function formatClassMember(member: string, name: string): MemberDisplay {
       const details: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
       const writable: string[] = details.isOk() ? details.value.methods.filter((item) => item.overloads.some((overload) => overload.some((field) => field.arg === '+RW' || field.arg === '+SET'))).map((item) => item.name) : [];
-      return formatMember(member, writable);
+      const delegateTypes: string[] = Model.current.getClassNames().filter((className: string) => {
+        const classDetails: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+        return classDetails.isOk() && classDetails.value.state === 'delegate';
+      });
+      const aliasTypes: Map<string, string> = new Map<string, string>();
+      Model.current.getClassNames().forEach((className: string) => {
+        const classDetails: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+        if (classDetails.isOk() && classDetails.value.state === 'alias' && classDetails.value.aliasType !== undefined) {
+          aliasTypes.set(className, compositeTypeText(classDetails.value.aliasType));
+        }
+      });
+      const display: MemberDisplay = formatMember(member, writable, delegateTypes, aliasTypes);
+      const property: RegExpMatchArray | null = member.match(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/u);
+      const aliasName: string | undefined = property?.[1];
+      if (aliasName) {
+        const alias: Result<ClassDetails, Error> = Model.current.tryGetModel(aliasName);
+        if (alias.isOk() && alias.value.state === 'alias' && alias.value.aliasType !== undefined) {
+          display.aliasExpansion = `         (\u{1F3AD}${compositeTypeText(alias.value.aliasType)})`;
+        }
+      }
+      return display;
+    }
+    function classHeaderText(name: string, width: number, state?: string): string {
+      const details: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
+      const delegate: boolean = state === 'delegate' || details.isOk() && details.value.state === 'delegate';
+      const union: boolean = state === 'union' || details.isOk() && details.value.state === 'union';
+      if (union) return `\u{1F500}${fitText(name, width - 22, 'bold 17px Arial')}`;
+      return delegate ? `${fitText(name, width - 22, 'bold 17px Arial')}⚡` : fitText(name, width, 'bold 17px Arial');
     }
     const members: MemberDisplay[] = diagram.members.map((member: string) => formatClassMember(member, diagram.title));
-    const rows: string[] = members.map((member: MemberDisplay) => fitText(member.text, 176, '13px monospace'));
+    function unionPanelRows(panels: readonly { type: string; aliasExpansion?: string }[]): string[] {
+      return panels.flatMap((panel: { type: string; aliasExpansion?: string }, index: number) => [
+        fitText(panel.type, 176, '13px monospace'),
+        ...(panel.aliasExpansion ? [fitText(panel.aliasExpansion, 176, '13px monospace')] : []),
+        ...(index + 1 < panels.length ? ['\u2500'.repeat(22)] : []),
+      ]);
+    }
+    const rows: string[] = diagram.state === 'union' && diagram.unionPanels ? unionPanelRows(diagram.unionPanels) : members.flatMap((member: MemberDisplay) => [
+      fitText(member.text, 176, '13px monospace'),
+      ...(member.aliasExpansion ? [fitText(member.aliasExpansion, 176, '13px monospace')] : []),
+    ]);
     const annotations: {
       start: number;
       end: number;
@@ -302,7 +409,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
         tabindex: number } }[] = [];
     let offset: number = 0;
     members.forEach((member: MemberDisplay, index: number) => {
-      const row: string = rows.at(index) ?? '';
+      const row: string = fitText(member.text, 176, '13px monospace');
       annotations.push({
         start: offset,
         end: offset + row.length,
@@ -315,6 +422,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
           'aria-describedby': 'method-tooltip',
           tabindex: 0 } });
       offset += row.length + 1;
+      if (member.aliasExpansion) offset += fitText(member.aliasExpansion, 176, '13px monospace').length + 1;
     });
     const height: number = Math.max(70, 54 + rows.length * 18);
     const source: dia.Element = rows.length === 0 ? new shapes.standard.Rectangle() : new shapes.standard.HeaderedRectangle();
@@ -322,7 +430,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     if (rows.length === 0) source.attr({
       body: { fill: '#e8efff', stroke: '#b5c2d3', strokeWidth: 1.5 },
       label: {
-        text: fitText(diagram.title, 130, 'bold 17px Arial'),
+        text: classHeaderText(diagram.title, 130, diagram.state),
         fill: '#233f73',
         fontFamily: 'Arial',
         fontSize: 17,
@@ -332,7 +440,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
       body: { fill: '#fff', stroke: '#b5c2d3', strokeWidth: 1.5 },
       header: { fill: '#e8efff', stroke: '#b5c2d3', height: 30 },
       headerText: {
-        text: fitText(diagram.title, 180, 'bold 17px Arial'),
+        text: classHeaderText(diagram.title, 180, diagram.state),
         fill: '#233f73',
         fontFamily: 'Arial',
         fontSize: 17,
@@ -349,21 +457,38 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
         y: 42,
         textVerticalAnchor: 'top' } });
     source.addTo(graph);
-    const nodeNames: Set<string> = new Set(diagram.targets.map((relation: Relation) => relation.target));
-    (diagram.classes ?? []).forEach((item: Diagram) => { item.targets.forEach((relation: Relation) => { nodeNames.add(relation.target); }); });
+    const nodeNames: Set<string> = new Set<string>();
+    const addRelationTarget: (relation: Relation) => void = (relation: Relation): void => {
+      graphClassTargets(relation.target).forEach((target: string) => nodeNames.add(target));
+    };
+    diagram.targets.forEach(addRelationTarget);
+    (diagram.classes ?? []).forEach((item: Diagram) => { item.targets.forEach(addRelationTarget); });
     nodeNames.delete(diagram.title);
     Model.current.getClassNames().forEach((className: string) => {
       const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
-      if (classModel.isOk() && classModel.value.state !== 'deleted' && (classModel.value.state !== 'partial' || partialRetention === 'retain')) nodeNames.add(className);
+      if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+      if (classModel.value.state === 'alias') {
+        if (classModel.value.aliasType !== undefined) graphTypeIdentifiers(classModel.value.aliasType).forEach((target: string) => graphClassTargets(target).forEach((resolved: string) => nodeNames.add(resolved)));
+        return;
+      }
+      if (classModel.value.state !== 'partial' || partialRetention === 'retain') nodeNames.add(className);
     });
     const nodes: Map<string, dia.Element> = new Map<string, dia.Element>();
     let memberOffset: number = diagram.members.length;
     (diagram.classes ?? []).forEach((item: Diagram, index: number) => {
-      if (item.members.length === 0) { nodeNames.add(item.title); return; }
+      if (item.state === 'alias') {
+        const alias: Result<ClassDetails, Error> = Model.current.tryGetModel(item.title);
+        if (alias.isOk() && alias.value.aliasType !== undefined) graphTypeIdentifiers(alias.value.aliasType).forEach((target: string) => graphClassTargets(target).forEach((resolved: string) => nodeNames.add(resolved)));
+        return;
+      }
+      if (item.members.length === 0 && item.state !== 'union') { nodeNames.add(item.title); return; }
       nodeNames.delete(item.title);
       const full: shapes.standard.HeaderedRectangle = new shapes.standard.HeaderedRectangle();
       const entries: MemberDisplay[] = item.members.map((member: string) => formatClassMember(member, item.title));
-      const rows: string[] = entries.map((entry: MemberDisplay) => fitText(entry.text, 176, '13px monospace'));
+      const rows: string[] = item.state === 'union' && item.unionPanels ? unionPanelRows(item.unionPanels) : entries.flatMap((entry: MemberDisplay) => [
+        fitText(entry.text, 176, '13px monospace'),
+        ...(entry.aliasExpansion ? [fitText(entry.aliasExpansion, 176, '13px monospace')] : []),
+      ]);
       const annotations: {
         start: number;
         end: number;
@@ -377,7 +502,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
           tabindex: number } }[] = [];
       let offset: number = 0;
       entries.forEach((entry: MemberDisplay, entryIndex: number) => {
-        const row: string = rows.at(entryIndex) ?? '';
+        const row: string = fitText(entry.text, 176, '13px monospace');
         annotations.push({
           start: offset,
           end: offset + row.length,
@@ -390,6 +515,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
             'aria-describedby': 'method-tooltip',
             tabindex: 0 } });
         offset += row.length + 1;
+        if (entry.aliasExpansion) offset += fitText(entry.aliasExpansion, 176, '13px monospace').length + 1;
       });
       memberOffset += entries.length;
       full.position(400 + (index % 2) * 250, 145 + Math.floor(index / 2) * 200); full.resize(200, Math.max(70, 54 + rows.length * 18));
@@ -397,7 +523,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
         body: { fill: '#fff', stroke: '#b5c2d3', strokeWidth: 1.5 },
         header: { fill: '#e8efff', stroke: '#b5c2d3', height: 30 },
         headerText: {
-          text: fitText(item.title, 180, 'bold 17px Arial'),
+          text: classHeaderText(item.title, 180, item.state),
           fill: '#233f73',
           fontFamily: 'Arial',
           fontSize: 17,
@@ -421,7 +547,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
       target.attr({
         body: { fill: '#e8efff', stroke: '#b5c2d3', strokeWidth: 1.5 },
         label: {
-          text: fitText(name, 130, 'bold 17px Arial'),
+          text: classHeaderText(name, 130),
           fill: '#233f73',
           fontFamily: 'Arial',
           fontSize: 17,
@@ -447,9 +573,12 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     classes.forEach((owner: Diagram) => { owner.targets.forEach((relation: Relation) => {
       const ownerNode: dia.Element | undefined = nodes.get(owner.title);
       if (!ownerNode) return;
-      // UNTRUST-ALLOW-NULLISH: Map lookup returns undefined for absent keys; guard the renderer against any inconsistent projection before creating a link.
-      const target: dia.Element | undefined = nodes.get(relation.target);
-      if (!target) return;
+      const targets: dia.Element[] = graphClassTargets(relation.target).flatMap((name: string) => {
+        const target: dia.Element | undefined = nodes.get(name);
+        return target ? [target] : [];
+      });
+      if (targets.length === 0) return;
+      targets.forEach((target: dia.Element) => {
       const link: shapes.standard.Link = new shapes.standard.Link();
       link.router('rightAngle');
       link.source(ownerNode); link.target(target); link.attr({
@@ -476,6 +605,7 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
         position: { distance: 0.88, offset: -12 },
         attrs: { text: { text: '*', fontSize: 20, fill: '#233f73' } } });
       link.labels(labels); link.addTo(graph); link.toBack();
+      });
     }); });
     canvasHost.scrollLeft = graphScroll.current.left;
     canvasHost.scrollTop = graphScroll.current.top;
@@ -506,51 +636,51 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     if (classNameElement) {
       const name: string = classNameElement.closest('[data-class-name]')?.getAttribute('data-class-name') ?? '';
       const details: Result<ClassDetails, Error> = Model.current.tryGetModel(name);
-      if (details.isOk() && details.value.sourceFile && details.value.modifiedAt) {
-        const bounds: DOMRect = classNameElement.getBoundingClientRect();
-        const parent: DOMRect = container.getBoundingClientRect();
-        const showCode: boolean = actualCodeClasses.has(name);
-        const cachedCode: string | undefined = actualCodeCache.get(name);
-        setClassTooltip({
-          visible: true,
-          name,
-          sourceFile: details.value.sourceFile,
-          modifiedAt: details.value.modifiedAt,
-          sourceCodeState: showCode ? cachedCode ? 'loaded' : 'loading' : 'not-requested',
-          sourceCode: cachedCode ?? '',
-          left: Math.max(8, Math.min(bounds.left - parent.left, parent.width - 288)),
-          top: Math.max(8, bounds.bottom - parent.top + 6),
+      const sourceFile: string = details.isOk() ? details.value.sourceFile ?? '' : '';
+      const modifiedAt: string = details.isOk() ? details.value.modifiedAt ?? '' : '';
+      const bounds: DOMRect = classNameElement.getBoundingClientRect();
+      const parent: DOMRect = container.getBoundingClientRect();
+      const showCode: boolean = showActualCode;
+      const cachedCode: string | undefined = actualCodeCache.get(name);
+      setClassTooltip({
+        visible: true,
+        name,
+        sourceFile,
+        modifiedAt,
+        sourceCodeState: showCode ? cachedCode ? 'loaded' : sourceFile ? 'loading' : 'unavailable' : 'not-requested',
+        sourceCode: cachedCode ?? '',
+        left: Math.max(8, Math.min(bounds.left - parent.left, parent.width - 288)),
+        top: Math.max(8, bounds.bottom - parent.top + 6),
+      });
+      if (showCode && sourceFile && !cachedCode && !actualCodeRequests.current.has(name)) {
+        actualCodeRequests.current.add(name);
+        onGetActualCode(name, sourceFile).then((code: string) => {
+          actualCodeRequests.current.delete(name);
+          setActualCodeCache((current: ReadonlyMap<string, string>) => new Map<string, string>(current).set(name, code));
+          setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
+            visible: true,
+            name: current.name,
+            sourceFile: current.sourceFile,
+            modifiedAt: current.modifiedAt,
+            sourceCodeState: 'loaded',
+            sourceCode: code,
+            left: current.left,
+            top: current.top,
+          } : current);
+        }).catch((error: unknown) => {
+          console.warn(`Could not retrieve source code for ${name}.`, error);
+          actualCodeRequests.current.delete(name);
+          setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
+            visible: true,
+            name: current.name,
+            sourceFile: current.sourceFile,
+            modifiedAt: current.modifiedAt,
+            sourceCodeState: 'unavailable',
+            sourceCode: '',
+            left: current.left,
+            top: current.top,
+          } : current);
         });
-        if (showCode && !cachedCode && !actualCodeRequests.current.has(name)) {
-          actualCodeRequests.current.add(name);
-          onGetActualCode(name, details.value.sourceFile).then((code: string) => {
-            actualCodeRequests.current.delete(name);
-            setActualCodeCache((current: ReadonlyMap<string, string>) => new Map<string, string>(current).set(name, code));
-            setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
-              visible: true,
-              name: current.name,
-              sourceFile: current.sourceFile,
-              modifiedAt: current.modifiedAt,
-              sourceCodeState: 'loaded',
-              sourceCode: code,
-              left: current.left,
-              top: current.top,
-            } : current);
-          }).catch((error: unknown) => {
-            actualCodeRequests.current.delete(name);
-            console.warn(`Could not retrieve source code for ${name}.`, error);
-            setClassTooltip((current: ClassTooltipStateT) => current.visible && current.name === name ? {
-              visible: true,
-              name: current.name,
-              sourceFile: current.sourceFile,
-              modifiedAt: current.modifiedAt,
-              sourceCodeState: 'unavailable',
-              sourceCode: '',
-              left: current.left,
-              top: current.top,
-            } : current);
-          });
-        }
       }
       return;
     }
@@ -570,7 +700,16 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
       anchorTop: bounds.top - parent.top });
   }
   const allMembers: string[] = [...diagram.members, ...(diagram.classes ?? []).flatMap((item: Diagram) => item.members)];
-  const member: MemberDisplay = tooltip.visible ? (allMembers.map((item: string) => formatMember(item)).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
+  const delegateTypes: string[] = Model.current.getClassNames().filter((className: string) => {
+    const details: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    return details.isOk() && details.value.state === 'delegate';
+  });
+  const aliasTypes: Map<string, string> = new Map<string, string>();
+  Model.current.getClassNames().forEach((className: string) => {
+    const details: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
+    if (details.isOk() && details.value.state === 'alias' && details.value.aliasType !== undefined) aliasTypes.set(className, compositeTypeText(details.value.aliasType));
+  });
+  const member: MemberDisplay = tooltip.visible ? (allMembers.map((item: string) => formatMember(item, [], delegateTypes, aliasTypes)).at(tooltip.index) ?? { text: '', tooltip: '' }) : { text: '', tooltip: '' };
   const clickTimer: React.RefObject<number> = useRef<number>(0);
   const contextMenuElement: React.RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null);
   const contextMenuIsOpen: React.RefObject<boolean> = useRef<boolean>(false);
@@ -638,14 +777,19 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
     contextMenuIsOpen.current = true;
     const target: Element | null = event.target instanceof Element ? event.target.closest('[data-method-index]') : null;
     const memberTooltip: string | undefined = target?.getAttribute('data-method-tooltip') ?? undefined;
-    const classNameTarget: Element | null = event.target instanceof Element ? event.target.closest('text[joint-selector="headerText"], text[joint-selector="label"]') : null;
+    // UNTRUST-ALLOW-NULLISH: Event targets may be outside a rendered JointJS class element; a missing closest match means this click cannot select a class context action.
+    const classBox: Element | null = event.target instanceof Element ? event.target.closest('[data-class-name]') : null;
+    // UNTRUST-ALLOW-NULLISH: SVG text and header hit testing uses closest, which returns null for clicks that land elsewhere inside the canvas container.
+    const nameBarTarget: Element | null = event.target instanceof Element ? event.target.closest('text[joint-selector="headerText"], text[joint-selector="label"], rect[joint-selector="header"]') : null;
+    // UNTRUST-ALLOW-NULLISH: Plain rectangle classes use the body rectangle as their full name bar; missing SVG targets must not enable name-specific actions.
+    const plainClassBodyTarget: Element | null = classBox?.classList.contains('joint-type-standard-rectangle') ? event.target instanceof Element ? event.target.closest('rect[joint-selector="body"]') : null : null;
     setContextMenu({
       status: 'open',
       className: name,
       x: event.clientX,
       y: event.clientY,
       ...(memberTooltip ? { memberTooltip } : {}),
-      ...(classNameTarget ? { showActualCode: true } : {}),
+      ...(nameBarTarget || plainClassBodyTarget ? { showActualCode: true } : {}),
     });
   }
   function handleCanvasDoubleClick(event: React.MouseEvent<HTMLDivElement>): void {
@@ -656,15 +800,11 @@ function Canvas({ diagram, partialRetention, visible, focusRequest, onSelect, on
   return <div className="canvas-shell" onClickCapture={handleCanvasClickCapture} onClick={handleCanvasClick} onContextMenu={handleCanvasContextMenu} onDoubleClick={handleCanvasDoubleClick} onMouseOver={event => showTooltip(event.target, event.currentTarget)} onMouseOut={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }} onFocus={event => showTooltip(event.target, event.currentTarget)} onBlur={() => { setTooltip({ visible: false }); setClassTooltip({ visible: false }); }}>
     <div className="canvas" role="img" aria-label={`Diagram of ${diagram.title} with ${diagram.targets.map((relation: Relation) => relation.target).join(', ')}`} ref={host} />
     {tooltip.visible && member ? <MethodTooltip member={member} left={tooltip.left} top={tooltip.top} anchorTop={tooltip.anchorTop} /> : ''}
-    {classTooltip.visible ? <div role="tooltip" className="method-tooltip" style={{ left: classTooltip.left, top: classTooltip.top }}><strong>{classTooltip.name}</strong><div>File: {classTooltip.sourceFile}</div><div>Modified: <time dateTime={classTooltip.modifiedAt}>{classTooltip.modifiedAt}</time></div>{classTooltip.sourceCodeState !== 'not-requested' ? <><hr />{classTooltip.sourceCodeState === 'loaded' ? <pre className="actual-code-snippet">{classTooltip.sourceCode}</pre> : classTooltip.sourceCodeState === 'unavailable' ? <div>Code unavailable</div> : <div>Loading code…</div>}</> : ''}</div> : ''}
+    {classTooltip.visible ? <div role="tooltip" className="method-tooltip" style={{ left: classTooltip.left, top: classTooltip.top }}><strong>{classTooltip.name}</strong>{classTooltip.sourceFile ? <div>File: {classTooltip.sourceFile}</div> : ''}{classTooltip.modifiedAt ? <div>Modified: <time dateTime={classTooltip.modifiedAt}>{classTooltip.modifiedAt}</time></div> : ''}{classTooltip.sourceCodeState !== 'not-requested' ? <><hr />{classTooltip.sourceCodeState === 'loaded' ? <pre className="actual-code-snippet">{actualCodeMarkup(classTooltip.sourceCode)}</pre> : classTooltip.sourceCodeState === 'unavailable' ? <div>Code unavailable</div> : <div>Loading code…</div>}</> : ''}</div> : ''}
     {contextMenu.status === 'open' ? <div ref={contextMenuElement} className="class-context-menu" role="menu" aria-label="Class actions" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
-      {contextMenu.showActualCode ? <button type="button" role="menuitemcheckbox" aria-checked={actualCodeClasses.has(contextMenu.className)} onClick={() => setActualCodeClasses((current: ReadonlySet<string>) => {
-        const updated: Set<string> = new Set<string>(current);
-        if (updated.has(contextMenu.className)) updated.delete(contextMenu.className);
-        else updated.add(contextMenu.className);
-        return updated;
-      })}><span aria-hidden="true">{actualCodeClasses.has(contextMenu.className) ? '☑' : '☐'}</span> Show actual code</button> : ''}
+      {contextMenu.showActualCode ? <button type="button" role="menuitemcheckbox" aria-checked={showActualCode} onClick={() => setShowActualCode((current: boolean) => !current)}><span aria-hidden="true">{showActualCode ? '☑' : '☐'}</span> Show actual code</button> : ''}
       {contextMenu.memberTooltip ? <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onAskAbout(contextMenu.className, contextMenu.memberTooltip?.split(/[(:]/)[0]?.trim() ?? ''); setContextMenu({ status: 'closed' }); }}>Ask about...</button> : ''}
+      {contextMenu.showActualCode ? <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onAskAbout(contextMenu.className, ''); setContextMenu({ status: 'closed' }); }}>Ask about...</button> : ''}
       <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onSelect(contextMenu.className, false); setContextMenu({ status: 'closed' }); }}>Show class</button>
       <button type="button" role="menuitem" onClick={() => { contextMenuIsOpen.current = false; onEditChain(contextMenu.className); setContextMenu({ status: 'closed' }); }}>Edit chain</button>
     </div> : ''}
@@ -691,6 +831,7 @@ function hiddenClassTexts(shown: readonly string[], replacing: readonly string[]
     if (shown.includes(className) || replacing.includes(className)) return;
     const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
     if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+    if (classModel.value.state === 'alias') return;
     if (classModel.value.state === 'partial' && !referencesPartialClass(className, referenceText)) return;
     hidden.push(Model.decompile(classModel.value));
   });
@@ -723,6 +864,7 @@ function diagramFromModel(preferredNames: readonly string[], referenceText: stri
   orderedNames.forEach((className: string) => {
     const classModel: Result<ClassDetails, Error> = Model.current.tryGetModel(className);
     if (!classModel.isOk() || classModel.value.state === 'deleted') return;
+    if (classModel.value.state === 'alias') return;
     if (!preferred.has(className) && classModel.value.state === 'partial' && !referencesPartialClass(className, referenceText)) return;
     details.push(classModel.value);
   });
@@ -1033,7 +1175,7 @@ function ChatPanel({ onClose, bridgeConnectionStatus, onConnect, onSend, askAbou
   bridgeConnectionStatus: BridgeConnectionStatusT;
   onConnect: () => void;
   onSend: (prompt: string) => Promise<string>;
-  askAboutHeader: string | undefined;
+  askAboutHeader: React.ReactNode | undefined;
 }) {
   const [draft, setDraft]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
   const [messages, setMessages]: [readonly ChatMessageT[], React.Dispatch<React.SetStateAction<readonly ChatMessageT[]>>] = useState<readonly ChatMessageT[]>([]);
@@ -1215,9 +1357,11 @@ function App() {
   const [testsState, setTestsState]: [TestsLoadStateT, React.Dispatch<React.SetStateAction<TestsLoadStateT>>] = useState<TestsLoadStateT>({ status: 'loading' });
   const [mode, setMode]: [ModeT, React.Dispatch<React.SetStateAction<ModeT>>] = useState<ModeT>('classes');
   const [chatState, setChatState]: [ChatPanelStateT, React.Dispatch<React.SetStateAction<ChatPanelStateT>>] = useState<ChatPanelStateT>('closed');
-  const [askAboutHeader, setAskAboutHeader]: [string | undefined, React.Dispatch<React.SetStateAction<string | undefined>>] = useState<string | undefined>(undefined);
-  const [projectName, setProjectName]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>(DEFAULT_PROJECT_NAME);
+  const [askAboutHeader, setAskAboutHeader]: [React.ReactNode | undefined, React.Dispatch<React.SetStateAction<React.ReactNode | undefined>>] = useState<React.ReactNode | undefined>(undefined);
+  const [askAboutContext, setAskAboutContext]: [RelatedPromptContextT, React.Dispatch<React.SetStateAction<RelatedPromptContextT>>] = useState<RelatedPromptContextT>(EMPTY_RELATED_PROMPT_CONTEXT);
+  const [projectName, setProjectName]: [string, React.Dispatch<React.SetStateAction<string>>] = useState<string>('');
   const [projects, setProjects]: [string[], React.Dispatch<React.SetStateAction<string[]>>] = useState<string[]>([]);
+  const [projectsReady, setProjectsReady]: [boolean, React.Dispatch<React.SetStateAction<boolean>>] = useState<boolean>(false);
   const [newProjectDialog, setNewProjectDialog]: [NewProjectDialogStatusT, React.Dispatch<React.SetStateAction<NewProjectDialogStatusT>>] = useState<NewProjectDialogStatusT>('closed');
   const [projectSettingsDialog, setProjectSettingsDialog]: [ProjectSettingsDialogStatusT, React.Dispatch<React.SetStateAction<ProjectSettingsDialogStatusT>>] = useState<ProjectSettingsDialogStatusT>('closed');
   const [bridgeSession, setBridgeSession]: [PersistedVscodeBridgeSessionT | undefined, React.Dispatch<React.SetStateAction<PersistedVscodeBridgeSessionT | undefined>>] = useState<PersistedVscodeBridgeSessionT | undefined>(loadPersistedVscodeBridgeSession);
@@ -1241,33 +1385,47 @@ function App() {
   useEffect(() => {
     const controller: AbortController = new AbortController();
     loadProjectNames(controller.signal).then((names: string[]) => {
-      if (!controller.signal.aborted) setProjects(Array.from(new Set(names)).sort((left: string, right: string) => left.localeCompare(right)));
+      if (controller.signal.aborted) return;
+      const sortedNames: string[] = Array.from(new Set(names)).sort((left: string, right: string) => left.localeCompare(right));
+      const savedProjectName: string | undefined = loadSavedProjectName();
+      const initialProjectName: string = savedProjectName && sortedNames.includes(savedProjectName)
+        ? savedProjectName
+        : sortedNames.includes(DEFAULT_PROJECT_NAME) ? DEFAULT_PROJECT_NAME : sortedNames.at(0) ?? '';
+      setProjects(sortedNames);
+      setProjectName(initialProjectName);
+      setProjectsReady(true);
     }).catch((error: unknown) => {
       console.error('Project names request failed', error);
-      if (!controller.signal.aborted) setProjects([]);
+      if (!controller.signal.aborted) {
+        setProjects([]);
+        setProjectName('');
+        setProjectsReady(true);
+      }
     });
     return () => controller.abort();
   }, []);
   useEffect(() => {
+    if (!projectsReady || !projectName) return;
     const controller: AbortController = new AbortController();
     loadClassDetails(controller.signal, projectName).then((inventory) => {
       const details: ClassDetails[] = inventory.classes;
       Model.current = new ClassWorkspaceModel();
       Model.current.initClasses(details);
-      if (details.length === 0) {
+      const graphDetails: ClassDetails[] = details.filter((item: ClassDetails) => item.state !== 'alias');
+      if (graphDetails.length === 0) {
         // UNTRUST-ALLOW-NULLISH: An empty project inventory intentionally has no Diagram value, distinguishing its blank canvas from a graph projection while retaining the loaded-state object shape.
         setState({ status: 'ready', text: '', diagram: undefined });
         return;
       }
       // UNTRUST-ALLOW-NULLISH: The server can return an empty inventory, and Array.at returns undefined in that case; a non-empty inventory deliberately opens its first class without assuming a ClassDiagram declaration exists.
-      const sourceClass: ClassDetails | undefined = details.at(0);
-      const initial: Diagram | undefined = classDetailsToDiagramSet(details, inventory.memberChanges);
+      const sourceClass: ClassDetails | undefined = graphDetails.at(0);
+      const initial: Diagram | undefined = classDetailsToDiagramSet(graphDetails, inventory.memberChanges);
       if (!sourceClass || !initial) { setState({ status: 'error' }); return; }
       const text: string = Model.decompile(sourceClass);
       setState({ status: 'ready', text, diagram: initial });
     }).catch((error: unknown) => { console.error('Class details request failed', error); if (!controller.signal.aborted) setState({ status: 'error' }); });
     return () => controller.abort();
-  }, [projectName]);
+  }, [projectName, projectsReady]);
   useEffect(() => {
     return () => {
       if (bridgeDisconnectSubscription.current) bridgeDisconnectSubscription.current();
@@ -1311,13 +1469,17 @@ function App() {
     };
   });
   useEffect(() => {
+    if (!projectsReady || !projectName) return;
     const controller: AbortController = new AbortController();
     loadTestsInventory(controller.signal, projectName).then((tests: TestCaseDetails[]) => {
       if (!controller.signal.aborted) setTestsState({ status: 'ready', tests });
     }).catch((error: unknown) => { console.error('Tests inventory request failed', error); if (!controller.signal.aborted) setTestsState({ status: 'error' }); });
     return () => controller.abort();
-  }, [projectName]);
+  }, [projectName, projectsReady]);
   useEffect(() => saveVscodeWorkspaceSelection(selectedWorkspaceUris), [selectedWorkspaceUris]);
+  useEffect(() => {
+    if (projectsReady && projectName) saveSelectedProjectName(projectName);
+  }, [projectName, projectsReady]);
   function changeProject(nextProjectName: string): void {
     setState({ status: 'loading' });
     setTestsState({ status: 'loading' });
@@ -1424,19 +1586,33 @@ function App() {
     const client: VscodeBridgeConnectionT['client'] | null = bridgeClient.current;
     if (!client || bridgeConnectionStatus !== 'connected') logAndThrow(new Error('Connect to the VS Code bridge before sending a prompt.'));
     // UNTRUST-ALLOW-UNLOGGED-THROW: Rejections from the bridge are caught and logged by ChatPanel.sendPrompt, which presents the same failure to the user.
-    return client.promptAi(prompt, buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris));
+    const options: ReturnType<typeof buildChatPromptOptions> = buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris, projectName);
+    return client.promptAi(prompt, { ...options, ...askAboutContext });
   }
   async function getActualCodeForClass(className: string, sourceFile: string): Promise<string> {
     // UNTRUST-ALLOW-NULLISH: Raw source retrieval is delegated to the existing VS Code Bridge API and is unavailable until the user has paired a live bridge client.
     const client: VscodeBridgeConnectionT['client'] | null = bridgeClient.current;
     if (!client || bridgeConnectionStatus !== 'connected') logAndThrow(new Error('Connect to the VS Code bridge to retrieve source code.'));
-    const options: ReturnType<typeof buildChatPromptOptions> = buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris);
+    const options: ReturnType<typeof buildChatPromptOptions> = buildChatPromptOptions(bridgeWorkspaces, selectedWorkspaceUris, selectedAgentUris, projectName);
     const roots: readonly string[] = [options.cwd, ...options.workFolders];
     const code: GetCodeResult = await client.getCode(projectName, roots, sourceFile, className);
     return typeof code === 'string' ? code : code.join('\n\n');
   }
   function openAskAbout(className: string, memberName: string): void {
-    setAskAboutHeader(`Ask about ${memberName} in ${className}`);
+    setAskAboutContext({ relatedFile: '', relatedClass: className, relatedMember: memberName });
+    setAskAboutHeader(memberName ? <>Ask about <em>{memberName}</em> in <em>{className}</em></> : <>Ask about <em>{className}</em></>);
+    setChatState('open');
+  }
+  function closeChatPanel(): void {
+    setChatState('closed');
+    setAskAboutHeader(undefined);
+    setAskAboutContext(EMPTY_RELATED_PROMPT_CONTEXT);
+  }
+  function toggleChatPanel(): void {
+    if (chatState === 'open') {
+      closeChatPanel();
+      return;
+    }
     setChatState('open');
   }
   return <main>
@@ -1444,7 +1620,7 @@ function App() {
       mode={mode}
       onModeChange={setMode}
       chatState={chatState}
-      onChatToggle={() => setChatState((previous: ChatPanelStateT) => previous === 'open' ? 'closed' : 'open')}
+      onChatToggle={toggleChatPanel}
       projectName={projectName}
       projects={projects}
       onProjectChange={changeProject}
@@ -1452,7 +1628,7 @@ function App() {
       onProjectSettings={openProjectSettings}
     />
     {mode === 'classes' ? state.status === 'loading' ? <section className="mode-message" role="status">Loading class details…</section> : state.status === 'error' ? <section className="mode-message" role="alert">Could not load class details. Check that the server is running and reload.</section> : <Workspace key={projectName} initialText={state.text} initial={state.diagram} onAskAbout={openAskAbout} onGetActualCode={getActualCodeForClass} /> : mode === 'tests' ? testsState.status === 'loading' ? <section className="mode-message" role="status">Loading tests inventory…</section> : testsState.status === 'error' ? <section className="mode-message" role="alert">Could not load tests inventory. Check that the server is running and reload.</section> : <TestsWorkspace tests={testsState.tests} /> : <SemanticsWorkspace />}
-    {chatState === 'open' ? <ChatPanel onClose={() => setChatState('closed')} bridgeConnectionStatus={bridgeConnectionStatus} onConnect={openProjectSettings} onSend={sendChatPrompt} askAboutHeader={askAboutHeader} /> : ""}
+    {chatState === 'open' ? <ChatPanel onClose={closeChatPanel} bridgeConnectionStatus={bridgeConnectionStatus} onConnect={openProjectSettings} onSend={sendChatPrompt} askAboutHeader={askAboutHeader} /> : ""}
     {newProjectDialog === 'open' ? <NewProjectDialog onCancel={() => setNewProjectDialog('closed')} onCreate={createNewProject} /> : ''}
     {projectSettingsDialog === 'open' ? <VscodeBridgeSettingsDialog
       connectionStatus={bridgeConnectionStatus}

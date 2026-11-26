@@ -1,464 +1,289 @@
 import express from '@untrust/mandate-express';
 import { RequestValidationError } from '@untrust/mandate-core';
-import { ALLOWDUPS, vv } from '@untrust/vv/zod';
+import { ALLOWDUPS, UNIQUE, CodingIdentifier, PUBLIC, PublicDisclosure, JsonMap as VVJsonMap, ValidatedRegex, ValidatedString, ZodAdapter, vv, vv_CodingIdentifier } from '@untrust/vv/zod';
 import { z } from 'zod';
-import { Archetype, array, defineTypes, defineUncheckedCustomArchetype, DisclosurePolicy, disclosures, issue, noAdditionalValidation, object, regexString, type InferValue, type ValidationResult } from '@untrust/vv';
+import { PrintableAscii } from '@untrust/vv';
 import { JsonMap } from '@codaigram/shared/json-map';
-import type { ClassDetails, CompositeTypeT, FieldType } from '@codaigram/shared/class-types';
+import { type ClassDetails, type CompositeTypeT, type FieldType } from '@codaigram/shared/class-types';
 import type { ClassRepository, TestDetails, TestIdentifier, TestInventoryRepository, TestRecord } from './memory-repository.js';
 import type { DatabaseClassChange } from './memory-repository.js';
 import type { ClassHistory, ClassOrigin, ClassUpdate, CurrentClass } from './class-revision.js';
 import { InvalidClassRevisionError } from './class-revision.js';
 import { logAndThrow, logUnhandledRequestError, logValueShape } from './server_utils.js';
-import { ERROR_CODES } from './error-codes.js';
 
-//type PublicClassificationFactoryT = typeof classifications.public;
-type PublicStringDisclosureFactoryT = typeof disclosures.public<string>;
-type PublicBooleanDisclosureFactoryT = typeof disclosures.public<boolean>;
-type PublicFieldTypeDisclosureFactoryT = typeof disclosures.public<FieldType>;
-//type PublicClassificationT = ReturnType<PublicClassificationFactoryT>;
-////type PublicStringDisclosureT = ReturnType<PublicStringDisclosureFactoryT>;
-type PublicBooleanDisclosureT = ReturnType<PublicBooleanDisclosureFactoryT>;
-type PublicFieldTypeDisclosureT = ReturnType<PublicFieldTypeDisclosureFactoryT>;
-//type RegexStringArchetypeT = ReturnType<typeof regexString>;
-type ClassMethodDefinitionT = {
-  archetype: Archetype<string>;
-  //classification: Classification;
-  disclosure: DisclosurePolicy<string, string>;
-};
-type RelationNameDefinitionT = ClassMethodDefinitionT;
-type RelationKindDefinitionT = ClassMethodDefinitionT;
-type ClassNameDefinitionT = ClassMethodDefinitionT;
-type TestDefinitionT = ClassMethodDefinitionT;
-type FieldTypeDefinitionT = {
-  archetype: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>>;
-  //classification: PublicClassificationT;
-  disclosure: PublicFieldTypeDisclosureT;
-};
+class ProjectName extends ValidatedRegex<PublicDisclosure> {
+  public constructor(raw: string) { super(raw, 1, 200, PUBLIC); }
 
-const classNameDefinition: ClassNameDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 100 },
-    pattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>()
-};
-const CLASS_NAME: ReturnType<typeof defineTypes<{ ClassName: ClassNameDefinitionT }>> = defineTypes({ ClassName: classNameDefinition });
-type ClassNameT = typeof CLASS_NAME.ClassName;
-const projectNameDefinition: ClassMethodDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 100 },
-    pattern: /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
-    validateAdditional: noAdditionalValidation }),
-  disclosure: disclosures.public<string>(),
-};
-const PROJECT_NAME: ReturnType<typeof defineTypes<{ ProjectName: ClassMethodDefinitionT }>> = defineTypes({ ProjectName: projectNameDefinition });
-type ProjectNameT = typeof PROJECT_NAME.ProjectName;
-const PROJECT_PARAMS: ReturnType<typeof object<{ projectName: ProjectNameT }>> = object({ projectName: PROJECT_NAME.ProjectName });
-const testGroupDefinition: TestDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 100 },
-    pattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>() };
-const testNameDefinition: TestDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 100 },
-    pattern: /^[A-Za-z][A-Za-z0-9_-]*$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>() };
-const testDescriptionDefinition: TestDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 1000 },
-    pattern: /^[\x20-\x7e]+$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>() };
-const testPromptDefinition: TestDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value.trim(),
-    bounds: { minimum: 1, maximum: 10000 },
-    pattern: /^[\x20-\x7e\r\n\t]+$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>() };
-const TEST_VALUES: ReturnType<typeof defineTypes<{
-  TestGroup: TestDefinitionT;
-  TestName: TestDefinitionT;
-  TestDescription: TestDefinitionT;
-  TestPrompt: TestDefinitionT;
-}>> = defineTypes({
-  TestGroup: testGroupDefinition,
-  TestName: testNameDefinition,
-  TestDescription: testDescriptionDefinition,
-  TestPrompt: testPromptDefinition
-});
-type TestGroupT = typeof TEST_VALUES.TestGroup;
-type TestNameT = typeof TEST_VALUES.TestName;
-type TestDescriptionT = typeof TEST_VALUES.TestDescription;
-type TestPromptT = typeof TEST_VALUES.TestPrompt;
-const TEST_DETAILS: ReturnType<typeof object<{
-  group: TestGroupT;
-  name: TestNameT;
-  description: TestDescriptionT;
-  prompt: TestPromptT;
-}>> = object({
-  group: TEST_VALUES.TestGroup,
-  name: TEST_VALUES.TestName,
-  description: TEST_VALUES.TestDescription,
-  prompt: TEST_VALUES.TestPrompt });
-
-function historyRequestSchema() { return array(object({
-  group: TEST_VALUES.TestGroup,
-  name: TEST_VALUES.TestName,
-}), { minimum: 1, maximum: 100 }); }
-const TEST_HISTORY_REQUEST: ReturnType<typeof historyRequestSchema> = historyRequestSchema();
-function testChangeDto() { return vv.object({ when: vv.string(), text: vv.string() }); }
-const TEST_CHANGE_DTO: ReturnType<typeof testChangeDto> = testChangeDto();
-function testHistoryDto() { return vv.object({
-  group: vv.string(),
-  name: vv.string(),
-  prompts: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
-  descriptions: vv.array(TEST_CHANGE_DTO, { min: 0, max: 10000 }, ALLOWDUPS),
-}); }
-const TEST_HISTORY_DTO: ReturnType<typeof testHistoryDto> = testHistoryDto();
-function testSummaryDto() { return vv.object({
-  group: vv.string(),
-  name: vv.string(),
-  description: vv.string(),
-  lastChangedAt: vv.string(),
-}); }
-const TEST_SUMMARY_DTO: ReturnType<typeof testSummaryDto> = testSummaryDto();
-
-function testPromptHistoryDto() { return vv.object({
-  when: vv.string().trim().min(1).max(100),
-  text: vv.string().min(1).max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+$/u),
-}).strict(); }
-const TEST_PROMPT_HISTORY_DTO: ReturnType<typeof testPromptHistoryDto> = testPromptHistoryDto();
-function testUpdateDto() { return vv.object({
-  group: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
-  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
-  description: vv.string().trim().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
-  prompt: vv.string().max(10000).regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/u).optional(),
-  prompts: vv.array(TEST_PROMPT_HISTORY_DTO, { min: 0, max: 100 }, ALLOWDUPS).optional(),
-}).strict(); }
-const TEST_UPDATE_DTO: ReturnType<typeof testUpdateDto> = testUpdateDto();
-function testUpdateBatchDto() { return vv.array(TEST_UPDATE_DTO, { min: 1, max: 10000 }, ALLOWDUPS); }
-const TEST_UPDATE_BATCH_DTO: ReturnType<typeof testUpdateBatchDto> = testUpdateBatchDto();
-type TestUpdateBatchT = TestDetails[];
-const TEST_UPDATE_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<TestUpdateBatchT>> = defineUncheckedCustomArchetype<TestUpdateBatchT>({
-  kind: 'codaigram.test-update-batch',
-  validate: (input: unknown) => {
-    const result: z.ZodSafeParseResult<z.output<typeof TEST_UPDATE_BATCH_DTO>> = TEST_UPDATE_BATCH_DTO.safeParse(input);
-    if (!result.success) return {
-      success: false,
-      issues: [issue(ERROR_CODES.TEST_UPDATE_INVALID, 'Invalid test update.')],
-    };
-    const tests: TestDetails[] = result.data.map((item) => ({
-      group: item.group,
-      name: item.name,
-      description: item.description,
-      prompt: item.prompt ?? '',
-      prompts: (item.prompts ?? []).map((entry) => ({ when: entry.when, text: entry.text })),
-    }));
-    return { success: true, value: tests };
-  },
-});
-type TestUpdateDisclosureFactoryT = typeof disclosures.public<TestUpdateBatchT>;
-type TestUpdateDisclosureT = ReturnType<TestUpdateDisclosureFactoryT>;
-type TestUpdateDefinitionT = {
-  archetype: typeof TEST_UPDATE_ARCHETYPE;
-  disclosure: TestUpdateDisclosureT;
-};
-const testUpdateDefinition: TestUpdateDefinitionT = {
-  archetype: TEST_UPDATE_ARCHETYPE,
-  disclosure: disclosures.public<TestUpdateBatchT>(),
-};
-const TEST_UPDATE_VALUES: ReturnType<typeof defineTypes<{ TestUpdate: TestUpdateDefinitionT }>> = defineTypes({ TestUpdate: testUpdateDefinition });
-type TestUpdateValueT = typeof TEST_UPDATE_VALUES.TestUpdate;
-const TEST_UPDATE_VALUE: TestUpdateValueT = TEST_UPDATE_VALUES.TestUpdate;
-
-// VV currently has no built-in boolean archetype; this checks the primitive exactly, without coercion.
-const BOOLEAN: ReturnType<typeof defineUncheckedCustomArchetype<boolean>> = defineUncheckedCustomArchetype<boolean>({
-  kind: 'codaigram.boolean',
-  validate: (input: unknown) => typeof input === 'boolean' ? { success: true, value: input } : {
-    success: false,
-    issues: [issue(ERROR_CODES.BOOLEAN_INVALID, 'Expected a boolean.')] } });
-type BooleanValueDefinitionT = {
-  archetype: typeof BOOLEAN;
-  //classification: PublicClassificationT;
-  disclosure: PublicBooleanDisclosureT;
-};
-const methodDefinition: ClassMethodDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value,
-    bounds: { minimum: 1, maximum: 1000 },
-    pattern: /^[\x20-\x7e]+$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>()
-};
-function validateCompositeType(input: unknown, depth: number): ValidationResult<CompositeTypeT> {
-  if (Array.isArray(input)) {
-    if (input.length <= 100 && input.every((value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 1000 && /^[\x20-\x7e]+$/.test(value))) {
-      return { success: true, value: input as string[] };
-    }
-    return {
-      success: false,
-      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a bounded list of enum values.')] };
-  }
-  if (typeof input === 'string') {
-    if (input.length <= 1000 && /^[\x20-\x7e]+$/.test(input)) {
-      return { success: true, value: input };
-    }
-    return {
-      success: false,
-      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a printable type string.')] };
-  }
-  // UNTRUST-ALLOW-NULLISH: An untrusted JSON composite can be null, so reject it before treating its named entries as recursively composable values.
-  if (typeof input !== 'object' || input === null || Array.isArray(input) || depth >= 20) {
-    return {
-      success: false,
-      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a bounded composite type.')] };
-  }
-  const entries: [string, unknown][] = Object.entries(input);
-  if (entries.length > 100) {
-    return {
-      success: false,
-      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected at most 100 named composite fields.')] };
-  }
-  const composite: JsonMap<string, CompositeTypeT> = new JsonMap<string, CompositeTypeT>();
-  for (let index: number = 0; index < entries.length; index += 1) {
-    const entry: [string, unknown] = entries[index]!;
-    const name: string = entry[0];
-    const item: unknown = entry[1];
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      return {
-        success: false,
-        issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a named composite field.')] };
-    }
-    const result: ValidationResult<CompositeTypeT> = validateCompositeType(item, depth + 1);
-    if (!result.success) return result;
-    composite.set(name, result.value);
-  }
-  return { success: true, value: composite };
+  protected regexp() { return /^[A-Za-z0-9][A-Za-z0-9_-]*$/; }
+  protected validityDescription() { return 'Must start with an alphanumeric character, followed by letters, digits, underscores, or dashes.'; }
 }
 
-function validateFieldType(input: unknown, depth: number = 0): ValidationResult<FieldType> {
-  // UNTRUST-ALLOW-NULLISH: An untrusted JSON field description can be null at the HTTP boundary, so reject that absent value before safely inspecting its required arg and type properties.
-  if (typeof input !== 'object' || input === null || Array.isArray(input) || !('arg' in input) || !('t' in input) || typeof input.arg !== 'string' || input.arg.length === 0 || input.arg.length > 100 || !/^(?:\+[A-Z]+|[A-Za-z_][A-Za-z0-9_]*)$/.test(input.arg)) {
-    return {
-      success: false,
-      issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Expected a field with arg and t.')] };
-  }
-  const compositeResult: ValidationResult<CompositeTypeT> = validateCompositeType(input.t, depth);
-  if (!compositeResult.success) return compositeResult;
-  if ('mutability' in input && input.mutability !== 'm' && input.mutability !== 'x' && input.mutability !== 'r') return {
-    success: false,
-    issues: [issue(ERROR_CODES.FIELD_TYPE_INVALID, 'Invalid argument mutability.')] };
-  const field: FieldType = { arg: input.arg, t: compositeResult.value };
-  if ('mutability' in input && (input.mutability === 'm' || input.mutability === 'x' || input.mutability === 'r')) field.mutability = input.mutability;
-  return { success: true, value: field };
+class ShortDescription extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 1000; }
 }
+const TestDescription = ShortDescription;
+type TestDescription = ShortDescription;
 
-type FieldTypeValidatorT = (input: unknown) => ValidationResult<FieldType>;
-const fieldTypeValidator: FieldTypeValidatorT = (input) => validateFieldType(input);
-const FIELD_TYPE: ReturnType<typeof defineUncheckedCustomArchetype<FieldType>> = defineUncheckedCustomArchetype<FieldType>({
-  kind: 'codaigram.field-type',
-  validate: fieldTypeValidator });
-const fieldTypeDefinition: FieldTypeDefinitionT = {
-  archetype: FIELD_TYPE,
-  //classification: classifications.public(),
-  disclosure: disclosures.public<FieldType>()
-};
-const relationNameDefinition: RelationNameDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value,
-    bounds: { minimum: 0, maximum: 100 },
-    pattern: /^(?:[A-Za-z_][A-Za-z0-9_]*)?$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>()
-};
-const relationKindDefinition: RelationKindDefinitionT = {
-  archetype: regexString({
-    normalize: (value: string) => value,
-    bounds: { minimum: 3, maximum: 4 },
-    pattern: /^(?:OWNS|REF|UNK)$/,
-    validateAdditional: noAdditionalValidation }),
-  //classification: classifications.public(),
-  disclosure: disclosures.public<string>()
-};
-const multiplicityDefinition: BooleanValueDefinitionT = {
-  archetype: BOOLEAN,
-  //classification: classifications.public(),
-  disclosure: disclosures.public<boolean>()
-};
-const VALUES: ReturnType<typeof defineTypes<{
-  Method: ClassMethodDefinitionT;
-  FieldType: FieldTypeDefinitionT;
-  RelationName: RelationNameDefinitionT;
-  RelationKind: RelationKindDefinitionT;
-  Multiplicity: BooleanValueDefinitionT;
-}>> = defineTypes({
-  Method: methodDefinition,
-  FieldType: fieldTypeDefinition,
-  RelationName: relationNameDefinition,
-  RelationKind: relationKindDefinition,
-  Multiplicity: multiplicityDefinition
+class TestGroup extends ValidatedRegex<PublicDisclosure> {
+  public constructor(value: string) { super(value, 1, 100, PUBLIC); }
+  protected regexp() { return /^[A-Za-z][A-Za-z0-9_-]*$/; }
+  protected validityDescription() { return 'Must start with a letter and contain only letters, digits, underscores, and dashes.'; }
+}
+const TestName = CodingIdentifier;
+type TestName = CodingIdentifier;
+const ClassName = CodingIdentifier;
+type ClassName = CodingIdentifier;
+const RelationName = CodingIdentifier;
+type RelationName = CodingIdentifier;
+const vv_RelationName = vv.union([RelationName, vv.enum([''])]);
+class TestPrompt extends ValidatedRegex<PublicDisclosure> {
+  public constructor(value: string) { super(value, 0, 10000, PUBLIC); }
+  protected regexp() { return /^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/u; }
+  protected validityDescription() { return 'Must not contain unsupported control characters.'; }
+}
+class Timestamp extends ValidatedString<PublicDisclosure> {
+  public constructor(value: string) { super(value, 16, 24, PUBLIC); }
+  protected normalizeOrUndefine(value: string) {
+    const iso = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$/.exec(value);
+    const legacy = /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/.exec(value);
+    const parts = iso ?? legacy;
+    if (!parts) return undefined;
+
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText, millisecondText] = parts;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const second = Number(secondText ?? 0);
+    const milliseconds = Number(millisecondText ?? 0);
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
+    date.setUTCHours(hour, minute, second, milliseconds);
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() === month - 1
+      && date.getUTCDate() === day
+      && date.getUTCHours() === hour
+      && date.getUTCMinutes() === minute
+      && date.getUTCSeconds() === second
+      && date.getUTCMilliseconds() === milliseconds
+      ? value
+      : undefined;
+  }
+  protected validityDescription() { return 'Must match YYYY-MM-DDTHH:mm:ss[.sss]Z or YYYY/MM/DD HH:mm and contain a valid date and time.'; }
+}
+// Typical values: "api-test", "scanner-os-user", "assistant"
+class ActorName extends ValidatedRegex<PublicDisclosure> {
+  public constructor(value: string) { super(value, 1, 100, PUBLIC); }
+  protected regexp() { return /^[A-Za-z][A-Za-z0-9_-]*$/; }
+  protected validityDescription() { return 'Must start with a letter and contain only letters, digits, underscores, and dashes.'; }
+}
+class VersionTag extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min(): number { return 1; }
+  public max(): number { return 100; }
+}
+// Typical values: "", "+RW: string", "options: { name: string }"
+class OverloadSignature extends ValidatedString<PublicDisclosure> {
+  public constructor(value: string) { super(value, 0, 256000, PUBLIC); }
+  protected normalizeOrUndefine(value: string) { return /^[\x20-\x7e]*$/.test(value) ? value : undefined; }
+  protected validityDescription() { return 'Must contain printable ASCII characters.'; }
+}
+// Typical values: "read", "display name", "with-dash"
+class MemberName extends ValidatedString<PublicDisclosure> {
+  public constructor(value: string) { super(value, 1, 1000, PUBLIC); }
+  protected normalizeOrUndefine(value: string) { return /^[\x20-\x7e]*$/.test(value) ? value : undefined; }
+  protected validityDescription() { return 'Must contain printable ASCII characters.'; }
+}
+// Typical values: ""
+class EmptyMemberName extends ValidatedString<PublicDisclosure> {
+  public constructor(value: string) { super(value, 0, 0, PUBLIC); }
+  protected normalizeOrUndefine(value: string) { return value === '' ? value : undefined; }
+  protected validityDescription() { return 'Must be empty.'; }
+}
+class SourceFilePath extends ValidatedString<PublicDisclosure> {
+  public constructor(value: string) { super(value, 1, 1024, PUBLIC); }
+  protected normalizeOrUndefine(value: string) { return /^[^\x00-\x1f\x7f]+$/u.test(value) ? value : undefined; }
+  protected validityDescription() { return 'Must not contain control characters.'; }
+}
+const vv_ProjectName = vv.object({ projectName: ProjectName });
+const vv_TestValues = vv.object({
+  group: TestGroup,
+  name: TestName,
+  description: TestDescription,
+  prompt: TestPrompt
 });
-type MethodT = typeof VALUES.Method;
-type FieldTypeT = typeof VALUES.FieldType;
-type RelationKindT = typeof VALUES.RelationKind;
-type RelationNameT = typeof VALUES.RelationName;
-type MultiplicityT = typeof VALUES.Multiplicity;
-function classOriginDto() { return vv.object({
+
+const vv_TestIdentifier = vv.object({
+  group: TestGroup,
+  name: TestName
+});
+const vv_TestIdentifierList = vv.array(vv_TestIdentifier, { min: 1, max: 100 }, ALLOWDUPS);
+
+const vv_TestPromptChange = vv.object({ when: Timestamp, text: TestPrompt }).strict();
+const vv_TestDescriptionChange = vv.object({ when: Timestamp, text: TestDescription }).strict();
+const vv_TestHistory = vv.object({
+  group: TestGroup,
+  name: TestName,
+  prompts: vv.array(vv_TestPromptChange, { min: 0, max: 10000 }, ALLOWDUPS),
+  descriptions: vv.array(vv_TestDescriptionChange, { min: 0, max: 10000 }, ALLOWDUPS),
+});
+const vv_TestSummary = vv.object({
+  group: TestGroup,
+  name: TestName,
+  description: TestDescription,
+  lastChangedAt: Timestamp,
+});
+
+const vv_TestUpdate = vv.object({
+  group: TestGroup,
+  name: TestName,
+  description: TestDescription,
+  prompt: vv.val(TestPrompt).optional(),
+  prompts: vv.array(vv_TestPromptChange, { min: 0, max: 100 }, ALLOWDUPS).optional(),
+}).strict();
+const vv_TestUpdateBatch = vv.array(vv_TestUpdate, { min: 1, max: 10000 }, ALLOWDUPS);
+
+class TypeExpression extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 1000; }
+};
+// Typical values: "chat/ask", "hello world", "options"
+class StringLiteral extends PrintableAscii<PublicDisclosure> {
+  public constructor(value: string) { super(value, PUBLIC); }
+  public min() : number { return 1; }
+  public max() : number { return 1000; }
+}
+// Typical values: "options", "value", "+GET", "+RET"
+const vv_FieldArgument = vv.union([
+  vv.enum(['+RO', '+RW', '+GET', '+SET', '+PROP', '+RET']),
+  CodingIdentifier,
+]);
+type CompositeTypeValue = TypeExpression | StringLiteral[] | VVJsonMap<CodingIdentifier, CompositeTypeValue>;
+const vv_CompositeType: z.ZodType<CompositeTypeValue> = vv.lazy(() => {
+  const enumValues: z.ZodType<StringLiteral[]> = vv.array(StringLiteral, { min: 0, max: 100 }, ALLOWDUPS);
+  const namedTuple = vv.recordMap(CodingIdentifier, vv_CompositeType, { min: 0, max: 100 });
+  return vv.union([TypeExpression, enumValues, namedTuple]) as z.ZodType<CompositeTypeValue>;
+});
+const vv_FieldValueShape = { t: vv_CompositeType, mutability: vv.enum(['m', 'x', 'r']).optional() };
+
+const vv_RelationKindDefinition = vv.enum(['OWNS', 'REF', 'UNK']);
+
+const vv_ClassOrigin = vv.object({
   kind: vv.enum(['scan', 'ai', 'user']),
-  name: vv.string().trim().min(1).max(100).regex(/^[^\x00-\x1f\x7f]+$/u),
-  version: vv.string().trim().min(1).max(100).regex(/^[\x20-\x7e]+$/),
-}).strict(); }
-const CLASS_ORIGIN_DTO: ReturnType<typeof classOriginDto> = classOriginDto();
-const VERSIONED_FIELD_DTO: z.ZodType<FieldType> = z.unknown().transform<FieldType>((input, context) => {
-  const result: ValidationResult<FieldType> = validateFieldType(input);
-  if (result.success) return result.value;
-  context.addIssue({ code: 'custom', message: 'Invalid field type.' });
-  return z.NEVER;
-});
-const MEMBER_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/).optional();
-const RELATION_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/).optional();
-const OVERLOAD_MODIFIES_DTO: z.ZodOptional<z.ZodString> = vv.string().max(256000).regex(/^[\x20-\x7e]*$/).optional();
-function versionedOverloadDto() { return vv.object({
-  args: vv.array(VERSIONED_FIELD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
-  modifies: OVERLOAD_MODIFIES_DTO,
-}).strict(); }
-const VERSIONED_OVERLOAD_DTO: ReturnType<typeof versionedOverloadDto> = versionedOverloadDto();
-function versionedMemberDto() { return vv.object({
-  name: vv.string().min(1).max(1000).regex(/^[\x20-\x7e]+$/),
-  overloads: vv.array(VERSIONED_OVERLOAD_DTO, { min: 0, max: 100 }, ALLOWDUPS),
-  modifies: MEMBER_MODIFIES_DTO,
-}).strict(); }
-const VERSIONED_MEMBER_DTO: ReturnType<typeof versionedMemberDto> = versionedMemberDto();
-function versionedRelationDto() { return vv.object({
-  kind: vv.enum(['OWNS', 'REF', 'UNK']),
-  name: vv.string().max(100).regex(/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/),
-  target: vv.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  name: ActorName,
+  version: VersionTag,
+}).strict();
+const vv_FieldType = vv.object({
+  arg: vv_FieldArgument,
+  ...vv_FieldValueShape,
+}).strict();
+const vv_CallableFieldType = vv.object({
+  arg: vv.union([vv.enum(['+RET']), CodingIdentifier]),
+  ...vv_FieldValueShape,
+}).strict();
+const vv_Overload = vv.object({
+  args: vv.array(vv_FieldType, { min: 0, max: 100 }, ALLOWDUPS),
+  modifies: vv.val(OverloadSignature).optional(),
+}).strict().refine((value) => value.args.every((field, index) => field.arg !== '+RET' || index === 0));
+const vv_CallableOverload = vv.object({
+  args: vv.array(vv_CallableFieldType, { min: 0, max: 100 }, ALLOWDUPS),
+  modifies: vv.val(OverloadSignature).optional(),
+}).strict().refine((value) => value.args.every((field, index) => field.arg !== '+RET' || index === 0));
+const vv_ClassMember = vv.union([
+  vv.object({ name: MemberName, overloads: vv.array(vv_Overload, { min: 0, max: 100 }, ALLOWDUPS), modifies: vv.val(MemberName).optional() }).strict(),
+  vv.object({ name: EmptyMemberName, overloads: vv.array(vv_CallableOverload, { min: 1, max: 100 }, ALLOWDUPS), modifies: vv.val(MemberName).optional() }).strict(),
+]);
+const vv_ClassRelation = vv.object({
+  kind: vv_RelationKindDefinition,
+  name: vv_RelationName,
+  member: vv_CodingIdentifier.optional(),
+  target: ClassName,
   many: vv.boolean(),
-  modifies: RELATION_MODIFIES_DTO,
-}).strict(); }
-const VERSIONED_RELATION_DTO: ReturnType<typeof versionedRelationDto> = versionedRelationDto();
-function versionedClassDto() { return vv.object({
-  name: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
-  renameOf: vv.string().trim().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(),
-  state: vv.enum(['partial', 'deleted']).optional(),
+  modifies: vv_RelationName.optional(),
+}).strict();
+const vv_ClassUpdate = vv.object({
+  name: ClassName,
+  renameOf: vv.val(ClassName).optional(),
+  state: vv.enum(['partial', 'deleted', 'delegate', 'union', 'alias']).optional(),
+  aliasType: vv_CompositeType.optional(),
   usage: vv.enum(['ex', 'dto']).optional(),
-  sourceFile: vv.string().min(1).max(1024).regex(/^[^\x00-\x1f\x7f]+$/u).optional(),
-  modifiedAt: vv.string().datetime().optional(),
-  methods: vv.array(VERSIONED_MEMBER_DTO, { min: 0, max: 100 }, ALLOWDUPS),
-  relations: vv.array(VERSIONED_RELATION_DTO, { min: 0, max: 100 }, ALLOWDUPS),
-}).strict(); }
-const VERSIONED_CLASS_DTO: ReturnType<typeof versionedClassDto> = versionedClassDto();
-function versionedBatchDto() { return vv.object({
-  origin: CLASS_ORIGIN_DTO,
-  classes: vv.array(VERSIONED_CLASS_DTO, { min: 1, max: 100 }, ALLOWDUPS),
-}).strict(); }
-const VERSIONED_BATCH_DTO: ReturnType<typeof versionedBatchDto> = versionedBatchDto();
+  sourceFile: vv.val(SourceFilePath).optional(),
+  modifiedAt: vv.val(Timestamp).optional(),
+  methods: vv.array(vv_ClassMember, { min: 0, max: 100 }, ALLOWDUPS),
+  relations: vv.array(vv_ClassRelation, { min: 0, max: 100 }, ALLOWDUPS),
+}).strict().refine((value) => value.state !== 'delegate' || value.methods.length === 1 && value.methods[0]?.name instanceof EmptyMemberName && value.methods[0].overloads.length > 0 && value.relations.length === 0);
+const vv_ClassUpdateBatch = vv.object({
+  origin: vv_ClassOrigin,
+  classes: vv.array(vv_ClassUpdate, { min: 1, max: 100 }, ALLOWDUPS),
+}).strict();
 
-function normalizeVersionedClass(value: z.output<typeof VERSIONED_CLASS_DTO>): ClassUpdate {
+function exposeCompositeType(value: CompositeTypeValue): CompositeTypeT {
+  if (value instanceof TypeExpression) return value.exposeUnchecked();
+  if (Array.isArray(value)) return value.map(item => item.exposeUnchecked());
+
+  const result = new JsonMap<string, CompositeTypeT>();
+  for (const [key, nested] of value.entries()) result.set(key.exposeUnchecked(), exposeCompositeType(nested));
+  return result;
+}
+
+function exposeFieldType(value: z.output<typeof vv_FieldType>): FieldType {
+  const arg = typeof value.arg === 'string' ? value.arg : value.arg.exposeUnchecked();
+  const result: FieldType = { arg, t: exposeCompositeType(value.t) };
+  if (value.mutability) result.mutability = value.mutability;
+  return result;
+}
+
+function exposeTestUpdateBatch(value: z.output<typeof vv_TestUpdateBatch>): TestDetails[] {
+  return value.map((item) => ({
+    group: item.group.exposeUnchecked(),
+    name: item.name.exposeUnchecked(),
+    description: item.description.exposeUnchecked(),
+    prompt: item.prompt?.exposeUnchecked() ?? '',
+    prompts: (item.prompts ?? []).map((entry) => ({ when: entry.when.exposeUnchecked(), text: entry.text.exposeUnchecked() })),
+  }));
+}
+
+function exposeClassUpdate(value: z.output<typeof vv_ClassUpdate>): ClassUpdate {
   const result: ClassUpdate = {
-    name: value.name,
+    name: value.name.exposeUnchecked(),
     methods: value.methods.map((member) => {
       const result: ClassUpdate['methods'][number] = {
-        name: member.name,
+        name: member.name.exposeUnchecked(),
         overloads: member.overloads.map((overload) => {
-          const item: ClassUpdate['methods'][number]['overloads'][number] = { args: overload.args };
-          if (typeof overload.modifies === 'string') item.modifies = overload.modifies;
+          const item: ClassUpdate['methods'][number]['overloads'][number] = { args: overload.args.map(exposeFieldType) };
+          if (overload.modifies !== undefined) item.modifies = overload.modifies.exposeUnchecked();
           return item;
         }),
       };
-      if (typeof member.modifies === 'string') result.modifies = member.modifies;
+      if (member.modifies !== undefined) result.modifies = member.modifies.exposeUnchecked();
       return result;
     }),
     relations: value.relations.map((relation) => {
       const result: ClassUpdate['relations'][number] = {
         kind: relation.kind,
-        name: relation.name,
-        target: relation.target,
+        name: typeof relation.name === 'string' ? relation.name : relation.name.exposeUnchecked(),
+        target: relation.target.exposeUnchecked(),
         many: relation.many,
       };
-      if (typeof relation.modifies === 'string') result.modifies = relation.modifies;
+      if (relation.member) result.member = relation.member.exposeUnchecked();
+      if (relation.modifies !== undefined) result.modifies = typeof relation.modifies === 'string' ? relation.modifies : relation.modifies.exposeUnchecked();
       return result;
     }),
   };
-  if (value.renameOf) result.renameOf = value.renameOf;
+  if (value.renameOf !== undefined) result.renameOf = value.renameOf.exposeUnchecked();
   if (value.state) result.state = value.state;
+  if (value.aliasType !== undefined) result.aliasType = exposeCompositeType(value.aliasType);
   if (value.usage) result.usage = value.usage;
-  if (value.sourceFile) result.sourceFile = value.sourceFile;
-  if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
+  if (value.sourceFile !== undefined) result.sourceFile = value.sourceFile.exposeUnchecked();
+  if (value.modifiedAt !== undefined) result.modifiedAt = value.modifiedAt.exposeUnchecked();
   return result;
 }
 
-type ClassBatchT = { origin: ClassOrigin; classes: ClassUpdate[] };
-const CLASS_BATCH_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<ClassBatchT>> = defineUncheckedCustomArchetype<ClassBatchT>({
-  kind: 'codaigram.class-update-batch',
-  validate: (input: unknown) => {
-    const parsed: z.ZodSafeParseResult<z.output<typeof VERSIONED_BATCH_DTO>> = VERSIONED_BATCH_DTO.safeParse(input);
-    if (!parsed.success) return {
-      success: false,
-      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid class update.')],
-    };
-    return {
-      success: true,
-      value: {
-        origin: parsed.data.origin,
-        classes: parsed.data.classes.map(normalizeVersionedClass),
-      },
-    };
-  },
-});
-type ClassBatchDisclosureFactoryT = typeof disclosures.public<ClassBatchT>;
-type ClassBatchDisclosureT = ReturnType<ClassBatchDisclosureFactoryT>;
-type ClassBatchDefinitionT = {
-  archetype: typeof CLASS_BATCH_ARCHETYPE;
-  disclosure: ClassBatchDisclosureT;
-};
-const classBatchDefinition: ClassBatchDefinitionT = {
-  archetype: CLASS_BATCH_ARCHETYPE,
-  disclosure: disclosures.public<ClassBatchT>(),
-};
-const CLASS_BATCH_TYPES: ReturnType<typeof defineTypes<{ ClassBatch: ClassBatchDefinitionT }>> = defineTypes({ ClassBatch: classBatchDefinition });
-type ClassBatchValueT = typeof CLASS_BATCH_TYPES.ClassBatch;
-const CLASS_BATCH_VALUE: ClassBatchValueT = CLASS_BATCH_TYPES.ClassBatch;
-
-type RevisionRequestT = { howFarBack: number };
-const REVISION_REQUEST_ARCHETYPE: ReturnType<typeof defineUncheckedCustomArchetype<RevisionRequestT>> = defineUncheckedCustomArchetype<RevisionRequestT>({
-  kind: 'codaigram.revision-request',
-  validate: (input: unknown) => {
-    const parsed: z.ZodSafeParseResult<{ howFarBack: number }> = vv.object({ howFarBack: z.number().int().min(0).max(999) }).strict().safeParse(input);
-    return parsed.success ? { success: true, value: parsed.data } : {
-      success: false,
-      issues: [issue(ERROR_CODES.CLASS_UPDATE_INVALID, 'Invalid revision request.')],
-    };
-  },
-});
-type RevisionRequestDefinitionT = {
-  archetype: typeof REVISION_REQUEST_ARCHETYPE;
-  disclosure: RevisionRequestDisclosureT;
-};
-type RevisionRequestDisclosureFactoryT = typeof disclosures.public<RevisionRequestT>;
-type RevisionRequestDisclosureT = ReturnType<RevisionRequestDisclosureFactoryT>;
-const revisionRequestDefinition: RevisionRequestDefinitionT = {
-  archetype: REVISION_REQUEST_ARCHETYPE,
-  disclosure: disclosures.public<RevisionRequestT>(),
-};
-const REVISION_REQUEST_TYPES: ReturnType<typeof defineTypes<{ Request: RevisionRequestDefinitionT }>> = defineTypes({ Request: revisionRequestDefinition });
+const vv_RevisionRequest = vv.object({ howFarBack: z.number().int().min(0).max(999) }).strict();
 
 class DuplicateClassError extends Error {}
 
@@ -477,18 +302,26 @@ type ErrorMiddlewareT = (
 function classDetailsFromCurrent(value: CurrentClass): ClassDetails {
   const result: ClassDetails = {
     name: value.name,
-    methods: value.methods.map((member) => ({
-      name: member.name,
-      overloads: member.overloads.map((overload) => overload.args),
-    })),
-    relations: value.relations.map((relation) => ({
-      kind: relation.kind,
-      name: relation.name,
-      target: relation.target,
-      many: relation.many,
-    })),
+    methods: value.methods.map((member) => {
+      const result: ClassDetails['methods'][number] = {
+        name: member.name,
+        overloads: member.overloads.map((overload) => overload.args),
+      };
+      return result;
+    }),
+    relations: value.relations.map((relation) => {
+      const result: ClassDetails['relations'][number] = {
+        kind: relation.kind,
+        name: relation.name,
+        target: relation.target,
+        many: relation.many,
+      };
+      if (typeof relation.member === 'string') result.member = relation.member;
+      return result;
+    }),
   };
   if (value.state) result.state = value.state;
+  if (value.aliasType !== undefined) result.aliasType = value.aliasType;
   if (value.usage) result.usage = value.usage;
   if (value.sourceFile) result.sourceFile = value.sourceFile;
   if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
@@ -503,7 +336,16 @@ const logRequestError: ErrorMiddlewareT = (error, _request, _response, next) => 
 const respondToRequestError: ErrorMiddlewareT = (error, _request, response, _next) => {
   if (error instanceof Error && 'status' in error && error.status === 413) {
     response.status(413).json({ error: 'Request is too large.' });
-  } else if (error instanceof RequestValidationError || error instanceof DuplicateClassError || error instanceof InvalidClassRevisionError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {
+  } else if (error instanceof RequestValidationError) {
+    const issues = error.issues.map((issue: unknown) => {
+      if (typeof issue !== 'object' || issue === null) return { field: 'body', message: 'Invalid value.' };
+      const details = issue as { readonly path?: unknown; readonly message?: unknown };
+      const path: string = Array.isArray(details.path) ? details.path.map((item: unknown) => String(item)).join('.') : 'body';
+      const message: string = typeof details.message === 'string' ? details.message : 'Invalid value.';
+      return { field: path || 'body', message };
+    });
+    response.status(400).json({ error: 'Invalid request.', source: error.source, issues });
+  } else if (error instanceof DuplicateClassError || error instanceof InvalidClassRevisionError || (error instanceof SyntaxError && 'status' in error && error.status === 400)) {
     response.status(400).json({ error: 'Invalid request.' });
   } else {
     response.status(500).json({ error: 'Request could not be completed.' });
@@ -518,21 +360,21 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
     const projectNames: string[] = await repository.getProjects();
     response.json(projectNames);
   });
-  app.post('/api/createProject', { body: PROJECT_PARAMS }, async (request, response) => {
+  app.post('/api/createProject', { body: vv_ProjectName }, async (request, response) => {
     const projectName: string = request.body.projectName.exposeUnchecked();
     await repository.createProject(projectName);
     response.status(201).json({ projectName });
   });
   app.post('/api/:projectName/classesDetails', {
-    params: PROJECT_PARAMS,
-    body: object({
-      classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }) }) }, async (request, response) => {
+    params: vv_ProjectName,
+    body: vv.object({
+      classNames: vv.array(vv_CodingIdentifier, { min: 1, max: 100 }, UNIQUE) }) }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
-    const names: string[] = request.body.classNames.map((className: InferValue<ClassNameT>) => className.exposeUnchecked());
+    const names: string[] = request.body.classNames.map((className) => className.exposeUnchecked());
     const details: ClassDetails[] = await repository.getDetails(projectName, names);
     response.json(details);
   });
-  app.get('/api/:projectName/getClasses', { params: PROJECT_PARAMS }, async (request, response) => {
+  app.get('/api/:projectName/getClasses', { params: vv_ProjectName }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
     const current: CurrentClass[] = await repository.getClassSnapshots(projectName);
     const names: Set<string> = new Set(current.map((item: CurrentClass) => item.name));
@@ -550,9 +392,9 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
     response.json(result);
   });
   app.post('/api/:projectName/getClassesHistory', {
-    params: PROJECT_PARAMS,
-    body: object({
-      classNames: array(CLASS_NAME.ClassName, { minimum: 1, maximum: 100 }),
+    params: vv_ProjectName,
+    body: vv.object({
+      classNames: vv.array(vv_CodingIdentifier, { min: 1, max: 100 }, ALLOWDUPS),
     }),
   }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
@@ -563,7 +405,7 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
         methods: ClassHistory['methods'];
         relations: ClassHistory['relations'];
         renames: ClassHistory['renames'];
-        state?: 'partial' | 'deleted';
+        state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
         usage?: 'ex' | 'dto';
       } = {
         name: item.name,
@@ -577,44 +419,54 @@ export function createApp(repository: ClassRepository & TestInventoryRepository)
     }));
   });
   app.post('/api/:projectName/getRevisionIds', {
-    params: PROJECT_PARAMS,
-    body: REVISION_REQUEST_TYPES.Request,
+    params: vv_ProjectName,
+    body: vv_RevisionRequest,
   }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
-    const input: RevisionRequestT = request.body.exposeUnchecked();
+    const input: z.output<typeof vv_RevisionRequest> = request.body;
     response.json(await repository.getRevisionIds(projectName, input.howFarBack));
   });
-  app.post('/api/:projectName/updateClasses', { params: PROJECT_PARAMS, body: CLASS_BATCH_VALUE }, async (request, response) => {
+  app.post('/api/:projectName/updateClasses', { params: vv_ProjectName, body: vv_ClassUpdateBatch }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
     logValueShape('Validated /api/updateClasses body shape', request.body);
-    const batch: ClassBatchT = request.body.exposeUnchecked();
-    if (new Set(batch.classes.map((item) => item.name)).size !== batch.classes.length) logAndThrow(new DuplicateClassError());
+    const batch: z.output<typeof vv_ClassUpdateBatch> = request.body;
+    if (new Set(batch.classes.map((item) => item.name.exposeUnchecked())).size !== batch.classes.length) logAndThrow(new DuplicateClassError());
+    const classes: ClassUpdate[] = batch.classes.map(exposeClassUpdate);
     const origin: ClassOrigin = batch.origin.kind === 'user'
       ? {
         kind: 'user',
         name: 'yariv',
-        version: batch.origin.version,
+        version: batch.origin.version.exposeUnchecked(),
       }
-      : batch.origin;
-    await repository.updateClassSnapshots(projectName, batch.classes, origin);
-    response.json({ updated: batch.classes.length });
+      : {
+        kind: batch.origin.kind,
+        name: batch.origin.name.exposeUnchecked(),
+        version: batch.origin.version.exposeUnchecked(),
+      };
+    await repository.updateClassSnapshots(projectName, classes, origin);
+    response.json({ updated: classes.length });
   });
-  app.get('/api/:projectName/getTests', { params: PROJECT_PARAMS }, async (request, response) => {
+  app.get('/api/:projectName/getTests', { params: vv_ProjectName }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
     const tests: TestRecord[] = await repository.getTests(projectName);
-    response.json(tests.map((item: TestRecord) => TEST_SUMMARY_DTO.parse(item)));
+    response.json(tests.map((item: TestRecord) => vv_TestSummary.parse({
+      group: item.group,
+      name: item.name,
+      description: item.description,
+      lastChangedAt: item.lastChangedAt,
+    })));
   });
-  app.post('/api/:projectName/getHistory', { params: PROJECT_PARAMS, body: TEST_HISTORY_REQUEST }, async (request, response) => {
+  app.post('/api/:projectName/getHistory', { params: vv_ProjectName, body: vv_TestIdentifierList }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
     const identifiers: TestIdentifier[] = request.body.map((item) => ({
       group: item.group.exposeUnchecked(),
       name: item.name.exposeUnchecked(),
     }));
-    response.json((await repository.getHistory(projectName, identifiers)).map((item) => TEST_HISTORY_DTO.parse(item)));
+    response.json((await repository.getHistory(projectName, identifiers)).map((item) => vv_TestHistory.parse(item)));
   });
-  app.post('/api/:projectName/updateTests', { params: PROJECT_PARAMS, body: TEST_UPDATE_VALUE }, async (request, response) => {
+  app.post('/api/:projectName/updateTests', { params: vv_ProjectName, body: vv_TestUpdateBatch }, async (request, response) => {
     const projectName: string = request.params.projectName.exposeUnchecked();
-    const tests: TestDetails[] = request.body.exposeUnchecked();
+    const tests: TestDetails[] = exposeTestUpdateBatch(request.body);
     if (new Set(tests.map((item: TestDetails) => `${item.group}.${item.name}`)).size !== tests.length) logAndThrow(new DuplicateClassError());
     await repository.updateTests(projectName, tests);
     response.json({ updated: tests.length });

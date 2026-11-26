@@ -93,13 +93,15 @@ Clients can retrieve a type definition's source text with `{"version":1,"type":"
 
 ## Initial source-code interrogation
 
-A synchronized chat request carries a prompt, an explicit `cwd`, and the other selected folders in `workFolders`. The browser omits `cwd` from `workFolders`; the bridge adds it when constructing Codex's complete work-folder list. When no additional folders are selected, Codex receives `[cwd]`:
+A synchronized chat request carries a prompt, an explicit `cwd`, the other selected folders in `workFolders`, a non-empty `projectName`, and string fields `relatedFile`, `relatedClass`, and `relatedMember`. The related fields may be empty strings. The browser omits `cwd` from `workFolders`; the bridge adds it when constructing Codex's complete work-folder list. When no additional folders are selected, Codex receives `[cwd]`:
 
 ```json
-{"version":1,"type":"chat","id":"chat-1","syncTimestamp":1700000000000,"prompt":"What files are in this workspace?","cwd":"C:\\workspace","workFolders":[]}
+{"version":1,"type":"chat","id":"chat-1","syncTimestamp":1700000000000,"prompt":"What files are in this workspace?","cwd":"C:\\workspace","workFolders":[],"projectName":"mock-project","relatedFile":"","relatedClass":"","relatedMember":""}
 ```
 
 When additional folders are selected, `workFolders` contains each selected folder except `cwd`; Codex uses `cwd` as its working directory and `[cwd, ...workFolders]` as its available work folders.
+
+Before forwarding the prompt, the extension prefixes the text from `ask_about.prompt`, replacing `<projectName>` with the request's project name. If any related field is non-empty, it appends `We are focusing on ` followed by `relatedFile`, `type <relatedClass>`, and `member <relatedMember>` for the non-empty values. An empty line and then the user's prompt follow this context. `relatedFile` is the protocol field corresponding to the related path.
 
 The bridge forwards the prompt to its read-only Codex App Server and returns the completed response:
 

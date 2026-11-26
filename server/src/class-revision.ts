@@ -27,6 +27,7 @@ export interface MemberUpdate {
 export interface RelationUpdate {
   kind: 'OWNS' | 'REF' | 'UNK';
   name: string;
+  member?: string | undefined;
   target: string;
   // UNTRUST-ALLOW-BOOLEAN: This adapter preserves the existing public class relationship contract's boolean multiplicity when it validates and records revisions.
   many: boolean;
@@ -36,7 +37,8 @@ export interface RelationUpdate {
 export interface ClassUpdate {
   name: string;
   renameOf?: string;
-  state?: 'partial' | 'deleted';
+  state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
+  aliasType?: CompositeTypeT;
   usage?: 'ex' | 'dto';
   sourceFile?: string;
   modifiedAt?: string;
@@ -60,6 +62,7 @@ export interface CurrentMember {
 export interface CurrentRelation {
   kind: 'OWNS' | 'REF' | 'UNK';
   name: string;
+  member?: string | undefined;
   target: string;
   // UNTRUST-ALLOW-BOOLEAN: Current snapshots preserve the class API's existing boolean multiplicity so scanner and editor consumers retain their established contract.
   many: boolean;
@@ -75,7 +78,8 @@ export interface CurrentClass {
   modifiedAt?: string;
   methods: CurrentMember[];
   relations: CurrentRelation[];
-  state?: 'partial' | 'deleted';
+  state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
+  aliasType?: CompositeTypeT;
 }
 
 export interface ClassRenameChange {
@@ -105,8 +109,8 @@ export type ClassChangeT =
   }
   | {
     kind: 'class';
-    before: 'partial' | 'deleted' | 'complete';
-    after: 'partial' | 'deleted' | 'complete';
+    before: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias' | 'complete';
+    after: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias' | 'complete';
   }
   | {
     kind: 'member';
@@ -162,7 +166,7 @@ export interface ClassHistory {
   usage?: 'ex' | 'dto';
   methods: HistoryMember[];
   relations: HistoryRelation[];
-  state?: 'partial' | 'deleted';
+  state?: 'partial' | 'deleted' | 'delegate' | 'union' | 'alias';
   renames: ClassRenameHistory[];
 }
 
@@ -180,43 +184,51 @@ function cloneType(type: CompositeTypeT): CompositeTypeT {
 export function cloneClassSnapshot(value: CurrentClass): CurrentClass {
   const result: CurrentClass = {
     name: value.name,
-    methods: value.methods.map((member: CurrentMember) => ({
-      name: member.name,
-      changedAt: member.changedAt || 'unknown',
-      origin: {
-        kind: member.origin.kind,
-        name: member.origin.name,
-        version: member.origin.version
-      },
-      overloads: member.overloads.map((overload: CurrentOverload) => ({
-        changedAt: overload.changedAt || 'unknown',
+    methods: value.methods.map((member: CurrentMember) => {
+      const copy: CurrentMember = {
+        name: member.name,
+        changedAt: member.changedAt || 'unknown',
         origin: {
-          kind: overload.origin.kind,
-          name: overload.origin.name,
-          version: overload.origin.version
+          kind: member.origin.kind,
+          name: member.origin.name,
+          version: member.origin.version
         },
-        args: overload.args.map((field: FieldType) => {
-          const result: FieldType = { arg: field.arg, t: cloneType(field.t) };
-          if (field.mutability) result.mutability = field.mutability;
-          return result;
-        }),
-      })),
-    })),
-    relations: value.relations.map((relation: CurrentRelation) => ({
-      kind: relation.kind,
-      name: relation.name,
-      target: relation.target,
-      many: relation.many,
-      changedAt: relation.changedAt || 'unknown',
-      origin: {
-        kind: relation.origin.kind,
-        name: relation.origin.name,
-        version: relation.origin.version
-      },
-    })),
+        overloads: member.overloads.map((overload: CurrentOverload) => ({
+          changedAt: overload.changedAt || 'unknown',
+          origin: {
+            kind: overload.origin.kind,
+            name: overload.origin.name,
+            version: overload.origin.version
+          },
+          args: overload.args.map((field: FieldType) => {
+            const result: FieldType = { arg: field.arg, t: cloneType(field.t) };
+            if (field.mutability) result.mutability = field.mutability;
+            return result;
+          }),
+        })),
+      };
+      return copy;
+    }),
+    relations: value.relations.map((relation: CurrentRelation) => {
+      const copy: CurrentRelation = {
+        kind: relation.kind,
+        name: relation.name,
+        target: relation.target,
+        many: relation.many,
+        changedAt: relation.changedAt || 'unknown',
+        origin: {
+          kind: relation.origin.kind,
+          name: relation.origin.name,
+          version: relation.origin.version
+        },
+      };
+      if (typeof relation.member === 'string') copy.member = relation.member;
+      return copy;
+    }),
   };
   if (value.usage) result.usage = value.usage;
   if (value.state) result.state = value.state;
+  if (value.aliasType !== undefined) result.aliasType = cloneType(value.aliasType);
   if (value.nonCryptoGuid) result.nonCryptoGuid = value.nonCryptoGuid;
   if (value.sourceFile) result.sourceFile = value.sourceFile;
   if (value.modifiedAt) result.modifiedAt = value.modifiedAt;
@@ -250,12 +262,14 @@ function memberValue(member: CurrentMember): MemberUpdate {
 }
 
 function relationValue(relation: CurrentRelation | RelationUpdate): RelationUpdate {
-  return {
+  const result: RelationUpdate = {
     kind: relation.kind,
     name: relation.name,
     target: relation.target,
     many: relation.many,
   };
+  if (typeof relation.member === 'string') result.member = relation.member;
+  return result;
 }
 
 function currentOverloads(updates: readonly OverloadUpdate[], previous: readonly CurrentOverload[], origin: ClassOrigin, when: string): CurrentOverload[] {
@@ -302,10 +316,11 @@ export function reviseClass(update: ClassUpdate, previous: CurrentClass | undefi
     const old: CurrentMember | undefined = requested ?? (member.modifies ? oldMembers.find((item: CurrentMember) => item.name === member.name) : requested);
     if (member.modifies && !old) logAndThrow(new InvalidClassRevisionError('Modified class member does not exist.'));
     if (member.modifies && requested && member.name !== oldName && oldMembers.some((item: CurrentMember) => item.name === member.name)) logAndThrow(new InvalidClassRevisionError('Class member name already exists.'));
-    if (member.modifies && !requested && old && !sameValue(memberValue(old), {
+    const requestedMember: MemberUpdate = {
       name: member.name,
-      overloads: member.overloads.map((item: OverloadUpdate) => ({ args: item.args }))
-    })) logAndThrow(new InvalidClassRevisionError('Modified class member does not exist.'));
+      overloads: member.overloads.map((item: OverloadUpdate) => ({ args: item.args })),
+    };
+    if (member.modifies && !requested && old && !sameValue(memberValue(old), requestedMember)) logAndThrow(new InvalidClassRevisionError('Modified class member does not exist.'));
     if (old) usedMembers.add(old.name);
     const overloads: CurrentOverload[] = currentOverloads(member.overloads, old?.overloads ?? [], origin, when);
     const changed: boolean = !old || old.name !== member.name || !sameValue(old.overloads.map((item: CurrentOverload) => item.args), overloads.map((item: CurrentOverload) => item.args));
@@ -351,6 +366,7 @@ export function reviseClass(update: ClassUpdate, previous: CurrentClass | undefi
       origin: old && !changed ? old.origin : origin,
       changedAt: old && !changed ? old.changedAt || 'unknown' : when,
     };
+    if (typeof relation.member === 'string') current.member = relation.member;
     if (changed) changes.push({
       kind: 'relation',
       before: old ? relationValue(old) : 'absent',
@@ -394,6 +410,7 @@ export function reviseClass(update: ClassUpdate, previous: CurrentClass | undefi
   };
   if (update.usage) current.usage = update.usage;
   if (update.state) current.state = update.state;
+  if (update.aliasType !== undefined) current.aliasType = cloneType(update.aliasType);
   if (previous?.nonCryptoGuid) current.nonCryptoGuid = previous.nonCryptoGuid;
   if (update.sourceFile) current.sourceFile = update.sourceFile;
   if (update.modifiedAt) current.modifiedAt = update.modifiedAt;
@@ -440,6 +457,10 @@ export function rebuildClassHistory(current: CurrentClass, revisions: readonly C
           status: after === 'absent' ? 'deleted' : 'active',
           history,
         });
+        if (typeof value.member === 'string') {
+          const storedRelation: HistoryRelation | undefined = relations.get(value.name);
+          if (storedRelation) storedRelation.member = value.member;
+        }
         return;
       }
       const before: MemberUpdate | 'absent' = change.before;

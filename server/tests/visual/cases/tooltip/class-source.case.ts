@@ -114,7 +114,7 @@ export function registerClassSourceCase(): void {
       const tooltip: Locator = page.getByRole('tooltip');
       await tooltip.locator('pre.actual-code-snippet').waitFor();
       assert.equal(await tooltip.locator('hr').count(), 1);
-      assert.equal(await tooltip.locator('pre.actual-code-snippet').innerText(), ACTUAL_SOURCE);
+      assert.equal(await tooltip.locator('pre.actual-code-snippet').textContent(), ACTUAL_SOURCE);
     } finally {
       await page.reload();
       await stopMockBridge(mock.process);

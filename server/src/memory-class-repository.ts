@@ -2,6 +2,7 @@ import type { ClassDetails, ClassRepository, TestDetails, TestHistory, TestIdent
 import type { DatabaseClassChange, DatabaseClassDelta } from './memory-repository.js';
 import { testRecordHistory, updateTestRecord } from './test-history.js';
 import { parseClassDetails } from '@codaigram/shared/class-types';
+import type { ClassMember } from '@codaigram/shared/class-types';
 import { logAndThrow } from './server_utils.js';
 import { cloneClassSnapshot, InvalidClassRevisionError, rebuildClassHistory, reviseClass } from './class-revision.js';
 import { createNonCryptoGuid } from './non-crypto-guid.js';
@@ -102,16 +103,24 @@ export class MemoryClassRepository implements ClassRepository, TestInventoryRepo
           usage: snapshot.usage,
           sourceFile: snapshot.sourceFile,
           modifiedAt: snapshot.modifiedAt,
-          methods: snapshot.methods.map((member) => ({
-            name: member.name,
-            overloads: member.overloads.map((overload) => overload.args),
-          })),
-          relations: snapshot.relations.map((relation) => ({
-            kind: relation.kind,
-            name: relation.name,
-            target: relation.target,
-            many: relation.many,
-          })),
+          aliasType: snapshot.aliasType,
+          methods: snapshot.methods.map((member) => {
+            const result: ClassMember = {
+              name: member.name,
+              overloads: member.overloads.map((overload) => overload.args),
+            };
+            return result;
+          }),
+          relations: snapshot.relations.map((relation) => {
+            const result: ClassDetails['relations'][number] = {
+              kind: relation.kind,
+              name: relation.name,
+              target: relation.target,
+              many: relation.many,
+            };
+            if (typeof relation.member === 'string') result.member = relation.member;
+            return result;
+          }),
           state: snapshot.state,
         })) as unknown, logAndThrow));
         return;

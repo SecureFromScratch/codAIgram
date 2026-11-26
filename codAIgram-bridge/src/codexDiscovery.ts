@@ -19,9 +19,9 @@ export async function probeExecutable(candidate: string, requireExecutePermissio
     return access.isOk();
 }
 
-export async function discoverCodexInPath(pathValue: string, platform: DiscoveryPlatformT, pathExtensions: string, probe: ExecutableProbeT): Promise<Result<CodexExecutable, CodexDiscoveryErrorT>> {
+export async function discoverCodexInPath(pathValue: string, platform: DiscoveryPlatformT, pathExtensions: string, probe: ExecutableProbeT, additionalDirectories: readonly string[] = []): Promise<Result<CodexExecutable, CodexDiscoveryErrorT>> {
     const windows: boolean = platform === "windows";
-    const directories: string[] = pathValue.split(windows ? ";" : ":").filter((directory) => windows
+    const directories: string[] = [...pathValue.split(windows ? ";" : ":"), ...additionalDirectories].filter((directory) => windows
         ? /^(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/u.test(directory)
         : path.posix.isAbsolute(directory));
     if (directories.length === 0) return err("invalid_path");
@@ -39,7 +39,7 @@ export async function discoverCodexInPath(pathValue: string, platform: Discovery
     return err("not_found");
 }
 
-export async function discoverCodexExecutable(): Promise<Result<CodexExecutable, CodexDiscoveryErrorT>> {
+export async function discoverCodexExecutable(additionalDirectories: readonly string[] = []): Promise<Result<CodexExecutable, CodexDiscoveryErrorT>> {
     const platform: DiscoveryPlatformT = process.platform === "win32" ? "windows" : "posix";
-    return discoverCodexInPath(process.env.PATH ?? "", platform, process.env.PATHEXT ?? "", probeExecutable);
+    return discoverCodexInPath(process.env.PATH ?? "", platform, process.env.PATHEXT ?? "", probeExecutable, additionalDirectories);
 }

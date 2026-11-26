@@ -35,10 +35,10 @@ export function registerInvalidMethodCase(): void {
     );
     await assertRedWavyError(editor, "addClass(name string)");
     await waitForMethodNames("ClassDiagram", [
-      "addClass",
-      "addPartialClass",
-      "connectClasses",
-      "recalcLayout",
+      "addClass()",
+      "addPartialClass()",
+      "connectClasses()",
+      "recalcLayout()",
     ]);
     await editor.fill(text);
     assert.equal(await editor.locator(".dsl-error").count(), 0);

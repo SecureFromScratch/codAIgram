@@ -3,7 +3,7 @@ import { isClassDetails, parseClassDetails } from '@codaigram/shared/class-types
 import { logAndThrow, warnLegacyPartialField } from './server_utils.js';
 import { StorageError } from './storage-error.js';
 import { ERROR_CODES } from './error-codes.js';
-import type { ArgsListT, ClassDetails, ClassMember } from '@codaigram/shared/class-types';
+import type { ArgsListT, ClassDetails, ClassMember, CompositeTypeT } from '@codaigram/shared/class-types';
 import type { ClassRepository, TestDetails, TestHistory, TestIdentifier, TestInventoryRepository, TestRecord } from './memory-repository.js';
 import type { DatabaseClassChange, DatabaseClassDelta } from './memory-repository.js';
 import { testRecordHistory, updateTestRecord } from './test-history.js';
@@ -22,11 +22,19 @@ export function createLocalFirestore(): Firestore {
   return new Firestore({ projectId });
 }
 
-type StoredMemberT = { name: string; overloads: { args: ArgsListT; }[]; };
+type StoredMemberT = {
+  name: string;
+  overloads: { args: ArgsListT; }[];
+};
 type StoredClassT = Omit<ClassDetails, 'methods'> & {
   methods: StoredMemberT[];
   // LEGACY HANDLING SHOULD BE REMOVED BY 2026/12/01 BY MIGRATING OLD STORAGE TO NEW FORMAT
   // UNTRUST-ALLOW-BOOLEAN: Firestore may still contain legacy documents with this boolean field; the reader translates it to the new optional state without rewriting or discarding existing data.
+  isPartial?: boolean;
+};
+type LegacyStoredMemberT = StoredMemberT & { rettype?: CompositeTypeT };
+type LegacyStoredClassT = Omit<ClassDetails, 'methods'> & {
+  methods: LegacyStoredMemberT[];
   isPartial?: boolean;
 };
 
@@ -35,9 +43,14 @@ function classDetailsForStorage(value: ClassDetails): FirebaseFirestore.Document
   const stored: StoredClassT = {
     name: value.name,
     relations: value.relations,
-    methods: value.methods.map((member: ClassMember) => ({
-      name: member.name,
-      overloads: member.overloads.map((args: ArgsListT) => ({ args })) })) };
+    methods: value.methods.map((member: ClassMember) => {
+      const result: StoredMemberT = {
+        name: member.name,
+        overloads: member.overloads.map((args: ArgsListT) => ({ args })),
+      };
+      return result;
+    }) };
+  if (value.aliasType !== undefined) stored.aliasType = value.aliasType;
   if (value.state) stored.state = value.state;
   const data: FirebaseFirestore.DocumentData = JSON.parse(JSON.stringify(stored)) as FirebaseFirestore.DocumentData;
   return data;
@@ -50,19 +63,25 @@ function classDetailsFromStorage(value: unknown, documentId: string): ClassDetai
   if (typeof value !== 'object' || value === null) return logAndThrow(new Error('Stored class details are invalid.'));
   if ('isPartial' in value) warnLegacyPartialField('classes', documentId);
   if (!('methods' in value) || !Array.isArray(value.methods)) return logAndThrow(new Error('Stored class details are invalid.'));
-  const stored: StoredClassT = value as StoredClassT;
+  const stored: LegacyStoredClassT = value as LegacyStoredClassT;
   const candidate: unknown = {
     name: stored.name,
     usage: stored.usage,
     sourceFile: stored.sourceFile,
     modifiedAt: stored.modifiedAt,
+    aliasType: stored.aliasType,
     relations: stored.relations,
     // REMOVE THIS BACKWARD COMPATIBILITY CODE IF NO PROBLEMS FOUND BY 2020/11/23
     // UNTRUST-ALLOW-NULLISH: Missing state represents a complete class and JSON normalization below removes this temporary undefined before the public class DTO is validated.
     state: 'state' in value ? value.state : stored.isPartial === true ? 'partial' : undefined,
-    methods: stored.methods.map((member: StoredMemberT) => ({
-      name: member.name,
-      overloads: Array.isArray(member.overloads) ? member.overloads.map((overload: { args: ArgsListT; }) => overload?.args) : member.overloads })) };
+    methods: stored.methods.map((member: LegacyStoredMemberT) => {
+      const result: ClassMember = {
+        name: member.name,
+        overloads: Array.isArray(member.overloads) ? member.overloads.map((overload: { args: ArgsListT; }) => overload?.args) : member.overloads as unknown as ArgsListT[],
+      };
+      if (Object.hasOwn(member, 'rettype')) result.overloads = result.overloads.map((args: ArgsListT) => [{ arg: '+RET', t: member.rettype! }, ...args]);
+      return result;
+    }) };
   const normalized: unknown = JSON.parse(JSON.stringify(candidate)) as unknown;
   if (!isClassDetails(normalized)) return logAndThrow(new Error('Stored class details are invalid.'));
   return parseClassDetails(normalized, logAndThrow);
@@ -119,10 +138,14 @@ export class FirestoreClassRepository implements ClassRepository, TestInventoryR
           usage: value.usage,
           sourceFile: value.sourceFile,
           modifiedAt: value.modifiedAt,
-          methods: value.methods.map((member) => ({
-            name: member.name,
-            overloads: member.overloads.map((overload) => overload.args),
-          })),
+          aliasType: value.aliasType,
+          methods: value.methods.map((member) => {
+            const result: ClassMember = {
+              name: member.name,
+              overloads: member.overloads.map((overload) => overload.args),
+            };
+            return result;
+          }),
           relations: value.relations.map((relation) => ({
             kind: relation.kind,
             name: relation.name,
